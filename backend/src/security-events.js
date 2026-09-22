@@ -1,0 +1,198 @@
+'use strict';
+
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const net = require('node:net');
+const path = require('node:path');
+
+const LEVELS = new Set(['info', 'warning', 'critical']);
+const TYPES = new Set([
+  'portal_visit', 'qr_login_page_opened', 'qr_login_attempt', 'qr_email_delivery',
+  'qr_verified', 'portal_session_created', 'access_request', 'rate_limited',
+  'request_rejected', 'suspicious_request', 'admin_action',
+]);
+const TOKEN = /\b[A-Za-z0-9_-]{43}\b/g;
+const SQL = /(?:\bunion\s+(?:all\s+)?select\b|\binformation_schema\b|\b(?:sleep|benchmark)\s*\(|\bwaitfor\s+delay\b|(?:'|%27)\s*(?:or|and)\s+['"%\d])/i;
+const TRAVERSAL = /(?:\.\.\/|\.\.\\|%2e%2e(?:%2f|%5c)|\/etc\/passwd|\/proc\/self)/i;
+const COMMAND = /(?:\$\(|`[^`]{0,120}`|(?:;|%3b|\||%7c)\s*(?:cat|curl|wget|sh|bash|nc|python|perl)\b)/i;
+const SCANNER = /(?:^|\/)(?:\.env|\.git|wp-admin|wp-login\.php|phpmyadmin|server-status|actuator|vendor\/phpunit)(?:\/|$)/i;
+
+function safeDecode(value) {
+  try { return decodeURIComponent(value); } catch (_) { return value; }
+}
+
+function safePath(pathname) {
+  return String(pathname || '/').slice(0, 512).replace(TOKEN, ':token').replace(/[\r\n]/g, '');
+}
+
+function sourceIp(request) {
+  const value = request.headers['x-portal-source-ip'];
+  return typeof value === 'string' && net.isIP(value) ? value : 'unknown';
+}
+
+function classifyRequest(request, url) {
+  const sample = safeDecode(`${url.pathname}${url.search}`.slice(0, 2048));
+  const findings = [];
+  if (SQL.test(sample)) findings.push({ category: 'sql_injection_probe', severity: 'critical' });
+  if (TRAVERSAL.test(sample)) findings.push({ category: 'path_traversal_probe', severity: 'critical' });
+  if (COMMAND.test(sample)) findings.push({ category: 'command_injection_probe', severity: 'critical' });
+  if (SCANNER.test(url.pathname)) findings.push({ category: 'automated_scanner_probe', severity: 'warning' });
+  if (!['GET', 'HEAD', 'POST'].includes(request.method || '')) findings.push({ category: 'unexpected_http_method', severity: 'warning' });
+  if (String(request.headers['content-length'] || '').length > 12) findings.push({ category: 'invalid_content_length', severity: 'warning' });
+  return findings;
+}
+
+class SecurityEvents {
+  constructor(directory, geoip, options = {}) {
+    this.directory = path.join(directory, 'security-events');
+    this.keyFile = path.join(this.directory, '.integrity-key');
+    this.geoip = geoip;
+    this.retentionDays = Number.isInteger(options.retentionDays) ? options.retentionDays
+      : Math.min(365, Math.max(1, Number.parseInt(process.env.SECURITY_EVENT_RETENTION_DAYS || '30', 10) || 30));
+    this.maxBytes = Number.isInteger(options.maxBytes) ? options.maxBytes
+      : Math.min(1024 * 1024 * 1024, Math.max(1024 * 1024,
+        Number.parseInt(process.env.SECURITY_EVENT_MAX_BYTES || String(64 * 1024 * 1024), 10) || 64 * 1024 * 1024));
+    fs.mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+    if (!fs.existsSync(this.keyFile)) fs.writeFileSync(this.keyFile, crypto.randomBytes(32), { mode: 0o600, flag: 'wx' });
+    this.key = fs.readFileSync(this.keyFile);
+    if (this.key.length !== 32) throw new Error('Invalid security-event integrity key');
+    this.lastCleanup = 0;
+    this.totalBytes = 0;
+    this.storageLimited = false;
+    this.buckets = new Map();
+    this.suppressed = 0;
+    this.cleanup();
+  }
+
+  _files() {
+    return fs.readdirSync(this.directory).filter((name) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(name)).sort();
+  }
+
+  cleanup(now = Date.now()) {
+    if (now - this.lastCleanup < 60 * 60 * 1000) return;
+    const cutoff = now - this.retentionDays * 24 * 60 * 60 * 1000;
+    for (const name of this._files()) {
+      const date = Date.parse(name.slice(0, 10) + 'T00:00:00.000Z');
+      if (Number.isFinite(date) && date < cutoff) fs.unlinkSync(path.join(this.directory, name));
+    }
+    const remaining = this._files();
+    this.totalBytes = remaining.reduce((total, name) => total + fs.statSync(path.join(this.directory, name)).size, 0);
+    while (this.totalBytes > this.maxBytes * 0.9 && remaining.length > 1) {
+      const oldest = remaining.shift();
+      this.totalBytes -= fs.statSync(path.join(this.directory, oldest)).size;
+      fs.unlinkSync(path.join(this.directory, oldest));
+    }
+    this.storageLimited = this.totalBytes >= this.maxBytes;
+    this.lastCleanup = now;
+  }
+
+  _hash(value) { return crypto.createHmac('sha256', this.key).update(String(value)).digest('base64url'); }
+
+  _admit(ip, severity, now = Date.now()) {
+    const window = Math.floor(now / 60000);
+    for (const [key, value] of this.buckets) if (value.window < window) this.buckets.delete(key);
+    const update = (key, maximum) => {
+      const current = this.buckets.get(key);
+      const value = current?.window === window ? current : { window, count: 0 };
+      if (value.count >= maximum) return false;
+      value.count += 1;
+      this.buckets.set(key, value);
+      return true;
+    };
+    return update('global', 3000) && update(`${ip}\0${severity}`, severity === 'info' ? 60 : 120);
+  }
+
+  record(type, data = {}) {
+    if (!TYPES.has(type)) throw new Error('Invalid security event type');
+    const severity = LEVELS.has(data.severity) ? data.severity : 'info';
+    const ip = typeof data.ip === 'string' && net.isIP(data.ip) ? data.ip : 'unknown';
+    if (!this._admit(ip, severity)) { this.suppressed += 1; return null; }
+    const at = new Date().toISOString();
+    const event = {
+      version: 1, id: crypto.randomUUID(), at, type, severity,
+      outcome: typeof data.outcome === 'string' ? data.outcome.slice(0, 80) : null,
+      reason: typeof data.reason === 'string' ? data.reason.slice(0, 120) : null,
+      destination: ['torrentharbor', 'firewall', 'unknown'].includes(data.destination) ? data.destination : null,
+      source: { ip, ...this.geoip.lookup(ip) },
+      http: data.request ? {
+        method: String(data.request.method || '').slice(0, 12),
+        path: safePath(data.pathname || data.request.url),
+        status: Number.isInteger(data.status) ? data.status : null,
+        agentHash: this._hash(String(data.request.headers['user-agent'] || '').slice(0, 512)),
+      } : null,
+      identityHash: data.identity ? this._hash(String(data.identity).trim().toLowerCase()) : null,
+      requestId: /^[0-9a-f-]{36}$/.test(data.requestId || '') ? data.requestId : null,
+      category: typeof data.category === 'string' ? data.category.slice(0, 80) : null,
+    };
+    const canonical = JSON.stringify(event);
+    event.integrity = this._hash(canonical);
+    const line = JSON.stringify(event) + '\n';
+    if (this.totalBytes + Buffer.byteLength(line) > this.maxBytes) {
+      this.storageLimited = true;
+      this.suppressed += 1;
+      return null;
+    }
+    fs.appendFileSync(path.join(this.directory, at.slice(0, 10) + '.jsonl'), line, { mode: 0o600 });
+    this.totalBytes += Buffer.byteLength(line);
+    console.log(JSON.stringify({ event: 'security_event', id: event.id, type, severity,
+      outcome: event.outcome, category: event.category }));
+    this.cleanup();
+    return event;
+  }
+
+  recordRequestFindings(request, url) {
+    const ip = sourceIp(request);
+    return classifyRequest(request, url).map((finding) => this.record('suspicious_request', {
+      ...finding, request, pathname: url.pathname, ip, outcome: 'observed', status: null,
+    }));
+  }
+
+  list(options = {}) {
+    const limit = Math.min(250, Math.max(1, Number.parseInt(options.limit || '100', 10) || 100));
+    const severity = LEVELS.has(options.severity) ? options.severity : null;
+    const type = TYPES.has(options.type) ? options.type : null;
+    const since = Number.isFinite(Date.parse(options.since || '')) ? Date.parse(options.since) : 0;
+    const events = [];
+    for (const name of this._files().reverse()) {
+      const lines = fs.readFileSync(path.join(this.directory, name), 'utf8').trim().split('\n').filter(Boolean).reverse();
+      for (const line of lines) {
+        let event;
+        try { event = JSON.parse(line); } catch (_) { continue; }
+        if (Date.parse(event.at) < since || (severity && event.severity !== severity) || (type && event.type !== type)) continue;
+        const integrity = event.integrity;
+        const canonical = { ...event };
+        delete canonical.integrity;
+        const supplied = Buffer.from(typeof integrity === 'string' ? integrity : '');
+        const expected = Buffer.from(this._hash(JSON.stringify(canonical)));
+        event.integrityValid = supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+        delete event.integrity;
+        events.push(event);
+        if (events.length >= limit) return events;
+      }
+    }
+    return events;
+  }
+
+  summary(now = Date.now()) {
+    const events = this.list({ limit: 250, since: new Date(now - 24 * 60 * 60 * 1000).toISOString() });
+    const count = (predicate) => events.filter(predicate).length;
+    const countries = new Map();
+    for (const event of events) if (event.source?.country) countries.set(event.source.country, (countries.get(event.source.country) || 0) + 1);
+    return {
+      windowHours: 24, total: events.length,
+      warnings: count((event) => event.severity === 'warning'),
+      critical: count((event) => event.severity === 'critical' || event.integrityValid === false),
+      integrityFailures: count((event) => event.integrityValid === false),
+      successfulQr: count((event) => event.type === 'portal_session_created' && event.outcome === 'success'),
+      failedLogin: count((event) => event.type === 'qr_login_attempt' && event.outcome !== 'accepted'),
+      accessRequests: count((event) => event.type === 'access_request'),
+      uniquePublicIps: new Set(events.filter((event) => event.source?.scope === 'public').map((event) => event.source.ip)).size,
+      countries: [...countries].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([country, value]) => ({ country, count: value })),
+      geoip: this.geoip.status(), retentionDays: this.retentionDays,
+      storage: { bytes: this.totalBytes, maximumBytes: this.maxBytes, limited: this.storageLimited,
+        suppressedSinceStart: this.suppressed },
+    };
+  }
+}
+
+module.exports = { SecurityEvents, classifyRequest, safePath, sourceIp };

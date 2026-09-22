@@ -10,6 +10,13 @@ The base deployment binds its two development listeners to loopback only.
 Add `compose.authentik.yaml` after generating protected local secrets and
 reviewing the settings in `docs/configuration/README.md`.
 
+## Optional offline GeoIP
+
+Add `compose.geoip.yaml` after installing current GeoLite2 City and ASN MMDB
+files in the protected directory configured by `SAG_GEOIP_DIR`. The backend
+performs local lookups only. Review [security monitoring](../security-monitoring.md)
+before exposing a TLS gateway publicly.
+
 ## Registry or air-gapped host
 
 Images use `${SAG_IMAGE_NAMESPACE}/{frontend,backend}:${SAG_IMAGE_TAG}`. A

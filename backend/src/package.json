@@ -7,10 +7,11 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check landing.js && node --check scene-config.js && node --check scene-assets.js && node --check scene-destinations.js && node --check scene-admin.js && node --check scene-admin-client.js && node --check mail.js && node --check allowlist.js && node --check assertion.js && node --check management.js && node --check store.js",
+    "check": "node --check server.js && node --check landing.js && node --check scene-config.js && node --check scene-assets.js && node --check scene-destinations.js && node --check scene-admin.js && node --check scene-admin-client.js && node --check mail.js && node --check allowlist.js && node --check assertion.js && node --check management.js && node --check store.js && node --check geoip.js && node --check security-events.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "maxmind": "5.0.7",
     "nodemailer": "10.0.10",
     "pngjs": "5.0.0",
     "qrcode": "^1.5.4",

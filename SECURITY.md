@@ -9,3 +9,9 @@ behind reviewed network and authentication boundaries.
 
 Security-sensitive deployment changes require route, denial, secret-mount,
 rollback, and recovery validation before production use.
+
+Internet-facing deployments must also validate their trusted client-IP proxy
+boundary, security-event retention, Authentik notifications, and edge log
+collection. The Scene Management security console is application telemetry,
+not a WAF or proof that a classified probe succeeded. See
+[security monitoring](docs/security-monitoring.md).

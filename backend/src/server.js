@@ -19,6 +19,8 @@ const { ImageLibrary } = require('./scene-assets');
 const { DestinationRegistry } = require('./scene-destinations');
 const { getFirewallRegistration } = require('./firewall-registration');
 const { ArcadeLeaderboard } = require('./arcade-leaderboard');
+const { GeoIpLookup } = require('./geoip');
+const { SecurityEvents, sourceIp } = require('./security-events');
 
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const ADMIN_PORT = process.env.ADMIN_PORT ? Number.parseInt(process.env.ADMIN_PORT, 10) : null;
@@ -30,11 +32,14 @@ const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
 const FIREWALL_TTL = 15 * 60 * 1000;
 const HANDOFF_TTL = 60 * 1000;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const store = new PortalStore(process.env.DATA_DIR || '/var/lib/access-portal');
-const destinationRegistry = new DestinationRegistry(process.env.DATA_DIR || '/var/lib/access-portal');
-const firewallRegistration = getFirewallRegistration(process.env.DATA_DIR || '/var/lib/access-portal');
-const imageLibrary = new ImageLibrary(process.env.DATA_DIR || '/var/lib/access-portal');
-const arcadeLeaderboard = new ArcadeLeaderboard(process.env.DATA_DIR || '/var/lib/access-portal');
+const DATA_DIR = process.env.DATA_DIR || '/var/lib/access-portal';
+const geoIp = new GeoIpLookup();
+const securityEvents = new SecurityEvents(DATA_DIR, geoIp);
+const store = new PortalStore(DATA_DIR);
+const destinationRegistry = new DestinationRegistry(DATA_DIR);
+const firewallRegistration = getFirewallRegistration(DATA_DIR);
+const imageLibrary = new ImageLibrary(DATA_DIR);
+const arcadeLeaderboard = new ArcadeLeaderboard(DATA_DIR);
 const backgrounds = () => ({ ...BACKGROUNDS, ...imageLibrary.catalog() });
 const sceneStore = new SceneStore(process.env.DATA_DIR || '/var/lib/access-portal', backgrounds);
 const artwork = new Map(Object.values(BACKGROUNDS).map((item) => [
@@ -120,7 +125,7 @@ function sequenceUnlocked(token, active, destinationId) {
     || (clickSessions.get(token)?.revisionId === (active.activationId || active.revisionId)
       && clickSessions.get(token)?.unlocks.has(destinationId));
 }
-function ip(req) { const value = req.headers['x-portal-source-ip']; return typeof value === 'string' && /^[0-9a-fA-F:.]{3,45}$/.test(value) ? value : 'unknown'; }
+function ip(req) { return sourceIp(req); }
 function email(value) { const normalized = value.trim().toLowerCase(); return EMAIL.test(normalized) && normalized.length <= 254 ? normalized : null; }
 function identifier(value) { return normalizedEmail(value) || normalizedUsername(value); }
 function send(res, status, headers, body) { res.writeHead(status, { 'Cache-Control': 'no-store, max-age=0', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'", ...headers }); res.end(body); }
@@ -129,9 +134,15 @@ function readForm(req) { return new Promise((resolve, reject) => { let body = ''
 function readJson(req) { return new Promise((resolve, reject) => { let body = ''; let bytes = 0; req.setEncoding('utf8'); req.on('data', (part) => { bytes += Buffer.byteLength(part); if (bytes > 4096) { reject(new Error('Request too large')); req.destroy(); return; } body += part; }); req.on('end', () => { try { const value = JSON.parse(body || '{}'); if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error('Invalid JSON'); resolve(value); } catch (error) { reject(error); } }); req.on('error', reject); }); }
 function issueAssertion(session) { if (!assertionIssuer) assertionIssuer = new AssertionIssuer(); return assertionIssuer.issue(session); }
 async function deliver(to, token) { if (!mailer) mailer = createMailer(loadSmtpConfig()); return mailer.sendMail({ from: loadSmtpConfig().from, to, subject: 'Confirm access', text: `Open this link to confirm access:\n${ORIGIN}/verify/${token}\n\nThis link expires in 15 minutes.` }); }
+function security(type, req, url, data = {}) {
+  try { return securityEvents.record(type, { request: req, pathname: url?.pathname || req.url, ip: ip(req), ...data }); }
+  catch (error) { console.error(JSON.stringify({ event: 'security_event_write_failed', type, error: error.code || error.name || 'Error' })); return null; }
+}
 
 const server = http.createServer(async (req, res) => {
   store.purge(); const url = new URL(req.url, ORIGIN);
+  try { securityEvents.recordRequestFindings(req, url); }
+  catch (error) { console.error(JSON.stringify({ event: 'security_event_write_failed', type: 'suspicious_request', error: error.code || error.name || 'Error' })); }
   if (url.pathname === '/healthz') return send(res, ['GET', 'HEAD'].includes(req.method) ? 200 : 405, { 'Content-Type': 'text/plain' }, req.method === 'HEAD' ? '' : 'ok\n');
   if (url.pathname === '/wolf3d' && ['GET', 'HEAD'].includes(req.method)) return send(res, 308, { Location: '/wolf3d/' }, '');
   const wolfPath = url.pathname === '/wolf3d/' ? '/wolf3d/index.html' : url.pathname;
@@ -183,6 +194,7 @@ const server = http.createServer(async (req, res) => {
     if (!firewallActive()) publicScene.hotspots = publicScene.hotspots.filter((item) => item.destinationId !== 'firewall');
     const body = landingPage(null, null, nonce, publicScene, backgrounds());
     const challengeCookie = `portal_challenge=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`;
+    if (req.method === 'GET') security('portal_visit', req, url, { outcome: 'challenge_created', status: 200, destination: 'torrentharbor' });
     return send(res, 200, { 'Content-Security-Policy': `default-src 'none'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'self' ${FIREWALL_ORIGIN}; frame-ancestors 'none'`, 'Referrer-Policy': 'strict-origin', 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': browserCookie ? [browserCookie, challengeCookie] : challengeCookie }, req.method === 'HEAD' ? '' : body);
   }
   if (url.pathname === '/challenge/current/qr' && req.method === 'GET') {
@@ -246,12 +258,24 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.startsWith('/login/') && ['GET', 'POST'].includes(req.method)) {
     const token = url.pathname.slice(7);
     const requestId = req.method === 'POST' ? newLoginRequestId() : null;
-    const record = (destination, outcome, smtpError) => logLoginOutcome(requestId, destination, outcome, smtpError);
+    const record = (destination, outcome, smtpError) => {
+      logLoginOutcome(requestId, destination, outcome, smtpError);
+      const delivery = outcome.startsWith('smtp_');
+      security(delivery ? 'qr_email_delivery' : outcome === 'rate_limited' ? 'rate_limited' : 'qr_login_attempt', req, url, {
+        requestId, destination, outcome: outcome === 'smtp_accepted' ? 'accepted' : outcome,
+        reason: smtpError || null, severity: ['rate_limited', 'invalid_challenge_token'].includes(outcome) ? 'warning' : 'info',
+        status: outcome === 'smtp_accepted' ? 200 : null,
+      });
+    };
     if (!/^[A-Za-z0-9_-]{43}$/.test(token)) {
       if (requestId) record('unknown', 'invalid_challenge_token');
       return neutral(res, 404);
     }
-    if (req.method === 'GET') return send(res, 200, { 'Content-Type': 'text/html; charset=utf-8' }, loginPage(token));
+    if (req.method === 'GET') {
+      security('qr_login_page_opened', req, url, { outcome: 'valid_token_format', status: 200,
+        destination: requestDestination(token) || 'unknown' });
+      return send(res, 200, { 'Content-Type': 'text/html; charset=utf-8' }, loginPage(token));
+    }
     const submitted = identifier((await readForm(req)).get('identifier') || '');
     if (!submitted) { record('unknown', 'invalid_identifier'); return neutral(res); }
     if (!store.allowAttempt(ip(req), submitted)) { record('unknown', 'rate_limited'); return neutral(res); }
@@ -278,7 +302,15 @@ const server = http.createServer(async (req, res) => {
     } catch (_) { record(destinationId, 'internal_error'); }
     return neutral(res);
   }
-  if (url.pathname.startsWith('/verify/') && req.method === 'GET') { const token = url.pathname.slice(8); if (!/^[A-Za-z0-9_-]{43}$/.test(token) || !store.consumeMessage(token)) return neutral(res, 404); return send(res, 200, { 'Content-Type': 'text/html; charset=utf-8' }, confirmedPage()); }
+  if (url.pathname.startsWith('/verify/') && req.method === 'GET') {
+    const token = url.pathname.slice(8);
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token) || !store.consumeMessage(token)) {
+      security('qr_verified', req, url, { outcome: 'rejected', severity: 'warning', status: 404 });
+      return neutral(res, 404);
+    }
+    security('qr_verified', req, url, { outcome: 'success', status: 200 });
+    return send(res, 200, { 'Content-Type': 'text/html; charset=utf-8' }, confirmedPage());
+  }
   if (url.pathname.startsWith('/challenge/') && req.method === 'GET') {
     const token = url.pathname.slice(11); const browserId = cookie(req, 'portal_browser'); const challenge = /^[A-Za-z0-9_-]{43}$/.test(token) && browserId ? store.getChallenge(token, tokenHash(browserId)) : null;
     if (!challenge) return send(res, 404, { 'Content-Type': 'application/json' }, '{}');
@@ -286,6 +318,7 @@ const server = http.createServer(async (req, res) => {
       const firewall = challenge.destinationId === 'firewall';
       if (firewall) {
         const handoff = store.approveAndCreateHandoff(token, Date.now() + HANDOFF_TTL);
+        security('portal_session_created', req, url, { outcome: 'success', destination: 'firewall', status: 200 });
         return send(res, 200, { 'Content-Type': 'application/json' },
           JSON.stringify({ handoff, action: FIREWALL_ORIGIN + '/_handoff' }));
       }
@@ -293,6 +326,7 @@ const server = http.createServer(async (req, res) => {
       const session = store.approveAndCreateSession(token, Date.now() + ttl);
       const name = firewall ? 'fw_session' : 'portal_session';
       const redirect = firewall ? FIREWALL_ORIGIN + '/' : '/torrentharbor/';
+      security('portal_session_created', req, url, { outcome: 'success', destination: 'torrentharbor', status: 200 });
       return send(res, 200, { 'Content-Type': 'application/json', 'Set-Cookie': `${name}=${session}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${ttl / 1000}` }, JSON.stringify({ redirect }));
     }
     return send(res, 200, { 'Content-Type': 'application/json' }, '{}');
@@ -318,7 +352,13 @@ const server = http.createServer(async (req, res) => {
     const token = form.get('challenge');
     const destinationId = token === null ? 'torrentharbor' : requestDestination(token);
     const address = email(form.get('email') || '');
-    if (destinationId && address && store.allowAttempt(ip(req), `${destinationId}:${address}`, 4, 2)) store.createRequest(address, ip(req), destinationId);
+    const allowed = Boolean(destinationId && address && store.allowAttempt(ip(req), `${destinationId}:${address}`, 4, 2));
+    const created = allowed ? store.createRequest(address, ip(req), destinationId) : null;
+    security(allowed ? 'access_request' : 'rate_limited', req, url, {
+      outcome: created ? 'accepted' : allowed ? 'duplicate_or_blocked' : 'rejected',
+      severity: allowed ? 'info' : 'warning', destination: destinationId || 'unknown',
+      identity: address, status: 200,
+    });
     return neutral(res);
   }
   if (url.pathname === '/logout' && req.method === 'POST') {
@@ -379,11 +419,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { 'Content-Type': 'application/json' }, JSON.stringify(result));
     } catch (_) { return send(res, 409, { 'Content-Type': 'application/json' }, '{"detail":"Request could not be completed"}'); }
   }
+  security('request_rejected', req, url, { outcome: 'not_found', severity: 'warning', status: 404 });
   return send(res, 404, { 'Content-Type': 'text/html; charset=utf-8' }, notFoundPage());
 });
 if (require.main === module) server.listen(PORT, '0.0.0.0', () => console.log(`Access portal listening on ${PORT}`));
 if (require.main === module && ADMIN_PORT) {
-  const adminServer = http.createServer(createSceneAdmin(process.env.DATA_DIR || '/var/lib/access-portal'));
+  const adminServer = http.createServer(createSceneAdmin(DATA_DIR, securityEvents));
   adminServer.listen(ADMIN_PORT, '0.0.0.0', () => console.log(`Access scene management listening on ${ADMIN_PORT}`));
 }
 module.exports = { server };
