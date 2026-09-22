@@ -352,9 +352,25 @@ function createSceneAdmin(directory) {
         return json(response, result.unchanged ? 200 : 201, result);
       } catch (error) { return json(response, 400, { error: error.message }); }
     }
-    const imageAction = /^\/api\/images\/(img-[a-f0-9]{48})\/(archive|restore)$/.exec(url.pathname);
+    const imageAction = /^\/api\/images\/(img-[a-f0-9]{48})\/(archive|restore|purge)$/.exec(url.pathname);
     if (imageAction && request.method === 'POST') {
       if (!csrf(request)) return csrfFailure(request, response);
+      if (imageAction[2] === 'purge') {
+        if (String(request.headers['content-type'] || '').split(';')[0].toLowerCase() !== 'application/json') return json(response, 415, { error: 'JSON required' });
+        const image = images.image(imageAction[1]);
+        if (!image) return json(response, 404, { error: 'Image not found' });
+        const refs = references();
+        if (refs.active === image.id || refs.draft === image.id) return json(response, 409, { error: 'Switch the active scene or draft to another background before deleting this image' });
+        if (refs.history.includes(image.id)) return json(response, 409, { error: 'This image is retained by a saved scene revision. Remove it from the background list instead so rollback remains available.' });
+        try {
+          const body = await readJson(request);
+          const expected = image.optimizedFrom ? 'DELETE OPTIMIZED COPY' : 'PERMANENTLY DELETE ORIGINAL';
+          if (body.confirmation !== expected) return json(response, 400, { error: 'Permanent-delete confirmation did not match' });
+          if (image.status !== 'archived') images.archive(image.id);
+          images.purge(image.id, refs.all, true);
+          return json(response, 200, { id: image.id, deleted: true });
+        } catch (error) { return json(response, 400, { error: error.message }); }
+      }
       if (imageAction[2] === 'archive') {
         const refs = references();
         if (refs.active === imageAction[1] || refs.draft === imageAction[1]) return json(response, 409, { error: 'Image is active or in a draft' });

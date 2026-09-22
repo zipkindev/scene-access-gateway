@@ -11,6 +11,7 @@ boundaries:
 5. Scene state and secrets are mounted at runtime and are not image content.
 6. Optional game integrations attach through a versioned extension contract.
 
-The first implementation milestone is to separate the existing combined Node
-application without changing its public routes or security behavior.
-
+The portable source retains the deployed application's behavior while keeping
+production topology and optional GPL game code outside the core image. The
+main repository is independently buildable; cross-repository CI also verifies
+the read-only Wolf extension overlay against it.

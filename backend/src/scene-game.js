@@ -5,6 +5,7 @@
   const COLS = 8;
   const ROWS = 8;
   const MINES = 10;
+  function minesFor(level) { return Math.min(30, MINES + Math.max(0, level - 1) * 2); }
   const rowY = [389, 414, 442, 472, 505, 543, 585, 635, 695];
   const topY = [384, 386, 387, 388, 389, 387, 387, 386, 386];
   const bottomY = [696, 694, 693, 692, 692, 693, 695, 698, 700];
@@ -71,7 +72,7 @@
     sheet.textContent = style;
     document.head.append(sheet);
   }
-  function mount(svg, onUpdate = () => {}) {
+  function mount(svg, onUpdate = () => {}, options = {}) {
     if (!svg || svg.namespaceURI !== NS) throw new Error('Scene game requires an SVG layer');
     installStyle();
     svg.setAttribute('class', 'scene-game-layer');
@@ -83,6 +84,10 @@
     let safeMoves;
     let revealedCount;
     let won;
+    let level = 1;
+    let totalRevealed = 0;
+    let mineCount = MINES;
+    let advancing = false;
     let destroyed = false;
     let suppressUntil = 0;
     const activePointers = new Map();
@@ -101,7 +106,9 @@
     }
     window.addEventListener('pointerup', endPointer, true);
     window.addEventListener('pointercancel', endPointer, true);
-    function update() { onUpdate({ safeMoves, revealedCount, finished, won }); }
+    function snapshot() { return { level, totalRevealed, cells: cells.map((cell) => ({ ...cell })), firstMove, safeMoves, revealedCount }; }
+    function freshSnapshot(nextLevel) { return { level: nextLevel, totalRevealed, cells: Array.from({ length: COLS * ROWS }, () => ({ mine: false, adjacent: 0, revealed: false, flagged: false })), firstMove: true, safeMoves: 0, revealedCount: 0 }; }
+    function update() { const state = { safeMoves, revealedCount, totalRevealed, level, mines: mineCount, finished, won }; onUpdate(state); options.onSave?.(snapshot()); }
     function render() {
       cells.forEach((cell, index) => {
         const shape = shapes[index];
@@ -124,7 +131,7 @@
         const j = Math.floor(Math.random() * (i + 1));
         [eligible[i], eligible[j]] = [eligible[j], eligible[i]];
       }
-      eligible.slice(0, MINES).forEach((index) => { cells[index].mine = true; });
+      eligible.slice(0, mineCount).forEach((index) => { cells[index].mine = true; });
       cells.forEach((cell, index) => { cell.adjacent = around(index).filter((other) => cells[other].mine).length; });
     }
     function blast(index) {
@@ -184,7 +191,7 @@
     function reveal(index) {
       const cell = cells[index];
       if (destroyed) return;
-      if (finished) { reset(); return; }
+      if (finished || advancing) return;
       if (cell.flagged || cell.revealed) return;
       if (firstMove) { placeMines(index); firstMove = false; }
       safeMoves++;
@@ -194,8 +201,10 @@
         won = false;
         render();
         blast(index);
+        options.onFinish?.({ level, totalRevealed });
         return;
       }
+      const before = revealedCount;
       const queue = [index];
       while (queue.length) {
         const current = queue.pop();
@@ -205,31 +214,40 @@
         revealedCount++;
         if (!candidate.adjacent) queue.push(...around(current));
       }
-      if (revealedCount === COLS * ROWS - MINES) {
+      totalRevealed += revealedCount - before;
+      if (revealedCount === COLS * ROWS - mineCount) {
         finished = true;
         won = true;
+        advancing = true;
         render();
         winEffect();
+        options.onSave?.(freshSnapshot(level + 1));
+        setTimeout(() => { if (!destroyed) reset(level + 1, totalRevealed); }, 1800);
       } else render();
     }
     function mark(index) {
       const cell = cells[index];
-      if (destroyed || finished || cell.revealed) return;
+      if (destroyed || finished || advancing || cell.revealed) return;
       cell.flagged = !cell.flagged;
       render();
     }
-    function reset() {
+    function reset(nextLevel = 1, preservedTotal = 0, restored = null) {
       if (destroyed) return;
       cancelPresses();
       activePointers.clear();
       svg.replaceChildren();
       shapes.length = 0;
       labels.length = 0;
-      cells = Array.from({ length: COLS * ROWS }, () => ({ mine: false, adjacent: 0, revealed: false, flagged: false }));
-      firstMove = true;
+      level = Number.isSafeInteger(nextLevel) && nextLevel > 0 ? nextLevel : 1;
+      totalRevealed = Number.isSafeInteger(preservedTotal) && preservedTotal >= 0 ? preservedTotal : 0;
+      const valid = restored && Array.isArray(restored.cells) && restored.cells.length === COLS * ROWS;
+      cells = valid ? restored.cells.map((cell) => ({ mine: !!cell.mine, adjacent: Number.isInteger(cell.adjacent) ? cell.adjacent : 0, revealed: !!cell.revealed, flagged: !!cell.flagged })) : Array.from({ length: COLS * ROWS }, () => ({ mine: false, adjacent: 0, revealed: false, flagged: false }));
+      firstMove = valid ? !!restored.firstMove : true;
       finished = false;
-      safeMoves = 0;
-      revealedCount = 0;
+      advancing = false;
+      safeMoves = valid && Number.isSafeInteger(restored.safeMoves) ? restored.safeMoves : 0;
+      revealedCount = valid && Number.isSafeInteger(restored.revealedCount) ? restored.revealedCount : 0;
+      mineCount = firstMove ? minesFor(level) : cells.filter((cell) => cell.mine).length;
       won = false;
       const defs = element('defs');
       const recess = element('linearGradient', { id: 'game-recess', x1: '0%', y1: '0%', x2: '0%', y2: '100%' });
@@ -278,14 +296,15 @@
       }
       render();
     }
-    reset();
+    const saved = options.saved;
+    reset(saved?.level, saved?.totalRevealed, saved);
     return { reset, destroy() {
       destroyed = true;
       cancelPresses();
       window.removeEventListener('pointerup', endPointer, true);
       window.removeEventListener('pointercancel', endPointer, true);
       svg.replaceChildren();
-    }, status() { return { safeMoves, revealedCount, finished, won }; } };
+    }, status() { return { safeMoves, revealedCount, totalRevealed, level, mines: mineCount, finished, won }; } };
   }
   globalThis.SceneGame = Object.freeze({ mount, backgroundId: 'future-minesweeper-v1' });
 })();

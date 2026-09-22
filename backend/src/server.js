@@ -18,6 +18,7 @@ const { BACKGROUNDS, SCENE_BUNDLES, SceneStore } = require('./scene-config');
 const { ImageLibrary } = require('./scene-assets');
 const { DestinationRegistry } = require('./scene-destinations');
 const { getFirewallRegistration } = require('./firewall-registration');
+const { ArcadeLeaderboard } = require('./arcade-leaderboard');
 
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const ADMIN_PORT = process.env.ADMIN_PORT ? Number.parseInt(process.env.ADMIN_PORT, 10) : null;
@@ -33,6 +34,7 @@ const store = new PortalStore(process.env.DATA_DIR || '/var/lib/access-portal');
 const destinationRegistry = new DestinationRegistry(process.env.DATA_DIR || '/var/lib/access-portal');
 const firewallRegistration = getFirewallRegistration(process.env.DATA_DIR || '/var/lib/access-portal');
 const imageLibrary = new ImageLibrary(process.env.DATA_DIR || '/var/lib/access-portal');
+const arcadeLeaderboard = new ArcadeLeaderboard(process.env.DATA_DIR || '/var/lib/access-portal');
 const backgrounds = () => ({ ...BACKGROUNDS, ...imageLibrary.catalog() });
 const sceneStore = new SceneStore(process.env.DATA_DIR || '/var/lib/access-portal', backgrounds);
 const artwork = new Map(Object.values(BACKGROUNDS).map((item) => [
@@ -162,6 +164,17 @@ const server = http.createServer(async (req, res) => {
     if (!asset) return send(res, 404, {}, '');
     return send(res, 200, { 'Content-Type': image.mediaType, 'Content-Length': asset.length, 'Cache-Control': 'public, max-age=31536000, immutable' }, req.method === 'HEAD' ? '' : asset);
   }
+  if (url.pathname === '/api/arcade/scores' && req.method === 'GET') {
+    try { return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8' }, JSON.stringify({ board: arcadeLeaderboard.list(url.searchParams.get('game') || '') })); }
+    catch (_) { return send(res, 400, { 'Content-Type': 'application/json; charset=utf-8' }, '{"board":[]}'); }
+  }
+  if (url.pathname === '/api/arcade/scores' && req.method === 'POST') {
+    if (req.headers.origin !== ORIGIN) return send(res, 403, {}, '');
+    const sourceIp = ip(req);
+    if (!store.allowAttempt(sourceIp, 'arcade-score:' + sourceIp, 12, 12)) return send(res, 429, {}, '');
+    try { const result = arcadeLeaderboard.submit(await readJson(req)); return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8' }, JSON.stringify(result)); }
+    catch (_) { return send(res, 409, { 'Content-Type': 'application/json; charset=utf-8' }, '{"detail":"Score could not be recorded"}'); }
+  }
   if (url.pathname === '/') {
     if (!['GET', 'HEAD'].includes(req.method)) return send(res, 405, { Allow: 'GET, HEAD', 'Content-Type': 'text/html; charset=utf-8' }, methodPage());
     const [browserId, browserCookie] = browser(req); const token = store.createChallenge(tokenHash(browserId), Date.now() + CHALLENGE_TTL);
@@ -181,7 +194,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === '/challenge/current' && req.method === 'GET') {
     const [token, challenge] = currentChallenge(req);
-    if (!challenge || challenge.destinationId === 'firewall') return send(res, 404, { 'Content-Type': 'application/json' }, '{}');
+    if (!challenge || challenge.destinationId === 'firewall') return send(res, 200, { 'Content-Type': 'application/json' }, JSON.stringify({ terminal: true }));
     url.pathname = '/challenge/' + token;
   }
   if (url.pathname === '/api/scene/hit' && req.method === 'POST') {

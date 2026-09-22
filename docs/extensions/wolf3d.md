@@ -36,6 +36,12 @@ docker compose \
   up -d --build
 ```
 
+Or run the extension repository's repeatable combined acceptance test:
+
+```sh
+../scene-access-gateway-wolf3d/scripts/smoke-combined.sh .
+```
+
 The extension repository documents its upstream sources and remaining public
 publishing review. Never commit imported `.WL6`, `.SOD`, `.WL*`, or `.SD*`
 files to either repository.

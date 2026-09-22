@@ -79,11 +79,14 @@ function validateScene(input, backgrounds = BACKGROUNDS, allowedDestinations = [
   const scene = clone(input);
   if (scene.motion === undefined) scene.motion = { enabled: false, effects: {} };
   if (scene.interaction === undefined) scene.interaction = { kind: 'none' };
-  exactKeys(scene, ['schemaVersion', 'sceneId', 'backgroundId', 'viewport', 'publicText', 'hotspots', 'motion', 'interaction'], 'scene');
+  if (scene.display === undefined) scene.display = { title: 'ZArcade' };
+  exactKeys(scene, ['schemaVersion', 'sceneId', 'backgroundId', 'viewport', 'publicText', 'hotspots', 'motion', 'interaction', 'display'], 'scene');
   if (scene.schemaVersion !== 1) throw new Error('unsupported scene schema');
   if (!ID.test(scene.sceneId || '')) throw new Error('invalid scene ID');
   if (!Object.hasOwn(backgrounds, scene.backgroundId)) throw new Error('unknown background');
   if (scene.publicText !== false) throw new Error('public scene text must remain disabled');
+  exactKeys(scene.display, ['title'], 'display');
+  if (typeof scene.display.title !== 'string' || scene.display.title.length < 1 || scene.display.title.length > 60 || scene.display.title !== scene.display.title.trim() || /[\u0000-\u001f\u007f]/.test(scene.display.title)) throw new Error('invalid browser tab title');
   exactKeys(scene.interaction, ['kind'], 'interaction');
   if (!['none', 'minesweeper'].includes(scene.interaction.kind)) throw new Error('unsupported interaction');
   if (scene.interaction.kind === 'minesweeper' && !gameCompatibleBackground(backgrounds, scene.backgroundId)) {

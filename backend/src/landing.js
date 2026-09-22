@@ -3,6 +3,10 @@
 const { BACKGROUNDS, DEFAULT_SCENE, validateScene, gameCompatibleBackground } = require('./scene-config');
 const { DESTINATIONS } = require('./destination-directory');
 
+function escapeTitle(value) {
+  return value.replace(/[&<>]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[character]);
+}
+
 function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCENE, backgrounds = BACKGROUNDS) {
   const sceneConfig = validateScene(configuration, backgrounds, ['torrentharbor', 'firewall']);
   const background = backgrounds[sceneConfig.backgroundId];
@@ -39,7 +43,7 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
-    <title>Access</title>
+    <title>${escapeTitle(sceneConfig.display.title)}</title>
     <style>
       * { box-sizing: border-box; }
       body { align-items: center; background: #020305; display: flex; justify-content: center; margin: 0; min-height: 100dvh; overflow: hidden; }
@@ -68,11 +72,13 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
       .wolf-symbol-hit { cursor:pointer; fill:transparent; outline:none; pointer-events:all; stroke:transparent; touch-action:manipulation; }
       .wolf-dial-exit { cursor:pointer; fill:transparent; outline:none; pointer-events:none; stroke:transparent; touch-action:manipulation; }
       .wolf-secret-hit { cursor:pointer; fill:transparent; outline:none; pointer-events:none; stroke:transparent; touch-action:manipulation; }
+      .wolf-symbol-layer.unlocked.menu-reward { opacity:1; }
+      .wolf-secret-hit.reward-reveal { fill:#f5c96b35; stroke:#ffe5a0; stroke-width:8; filter:drop-shadow(0 0 18px #ffd36f); }
       .wolf-symbol-layer.unlocked { opacity:0; pointer-events:none; transition:opacity .45s; }
       .wolf-symbol-layer.unlocked .wolf-symbol-hit { pointer-events:none; }
       .wolf-symbol-layer.unlocked .wolf-dial-exit { pointer-events:all; }
       .wolf-symbol-layer.unlocked .wolf-secret-hit { pointer-events:all; }
-      .wolf-crt-screen { background:#020403; clip-path:polygon(19.39% 2.53%,81.64% 2.53%,98.91% 98.09%,1.11% 96.85%); height:33.58%; left:22.07%; opacity:0; overflow:hidden; pointer-events:none; position:absolute; top:40.81%; transform:scaleY(.04); transform-origin:50% 50%; transition:opacity .15s,transform .65s cubic-bezier(.2,.85,.24,1); width:54.61%; z-index:15; }
+      .wolf-crt-screen { background:transparent; clip-path:polygon(19.39% 2.53%,81.64% 2.53%,98.91% 98.09%,1.11% 96.85%); height:33.58%; left:22.07%; opacity:0; overflow:hidden; pointer-events:none; position:absolute; top:40.81%; transform:none; transform-origin:50% 50%; transition:opacity .3s,transform .48s cubic-bezier(.4,0,.9,.2); width:54.61%; z-index:15; }
       .crt-unlocked .wolf-crt-screen { opacity:1; pointer-events:auto; transform:none; }
       .wolf-wide-screen .wolf-crt-screen { clip-path:none; height:100dvh; inset:0; position:fixed; width:100vw; z-index:30; }
       .wolf-wide-screen .wolf-crt-bezel { display:none; }
@@ -80,15 +86,56 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
       .wolf-crt-screen::after { animation:wolf-crt-scan 2.8s linear infinite; background:linear-gradient(#9effff00,#caffff26,#9effff00); content:""; height:12%; left:0; pointer-events:none; position:absolute; top:-15%; width:100%; z-index:4; }
       .wolf-crt-screen iframe,.wolf-crt-boot { border:0; height:100%; inset:0; position:absolute; width:100%; }
       .wolf-crt-screen iframe { background:#000; }
+      .wolf-crt-phosphor { inset:0; opacity:0; overflow:hidden; pointer-events:none; position:absolute; z-index:7; }
+      .wolf-crt-ray { background:linear-gradient(180deg,#080a0a 0 34%,#626969 46%,#202424 55%,#070909 68% 100%); height:calc(100% / 480 + .18px); left:0; opacity:0; position:absolute; right:0; top:var(--beam-y); transform:scaleX(0); transform-origin:var(--beam-origin) 50%; }
+      .wolf-crt-screen.beam-warm .wolf-crt-phosphor,.wolf-crt-screen.beam-raster .wolf-crt-phosphor,.wolf-crt-screen.beam-on .wolf-crt-phosphor,.wolf-crt-screen.beam-off .wolf-crt-phosphor { opacity:1; }
+      .wolf-crt-screen.beam-warm .wolf-crt-phosphor { background:#000; }
+      .wolf-crt-screen.beam-warm .wolf-crt-phosphor::after { animation:wolf-crt-ignite .72s cubic-bezier(.2,.82,.2,1) both; }
+      .wolf-crt-screen.beam-raster .wolf-crt-phosphor { background:transparent; }
+      .wolf-crt-screen.beam-raster .wolf-crt-ray { animation:wolf-crt-raster-build .24s ease-out var(--raster-delay) both; }
+      .wolf-crt-screen.beam-on .wolf-crt-ray { animation:wolf-crt-raster-ignite .58s ease-out var(--energy-delay) both; transform:scaleX(1); }
+      .wolf-crt-noise { height:100%; image-rendering:pixelated; inset:0; opacity:0; pointer-events:none; position:absolute; width:100%; z-index:8; }
+      .wolf-crt-noise.active { opacity:1; }
+      .wolf-crt-screen.beam-raster .wolf-crt-boot,.wolf-crt-screen.beam-warm .wolf-crt-boot { background:transparent; color:transparent; text-shadow:none; }
+      .wolf-crt-screen.beam-off .wolf-crt-ray { animation:wolf-crt-raster-dim .62s ease-in var(--out-delay) both; transform:scaleX(1); }
+      .wolf-crt-screen.beam-release .wolf-crt-phosphor { opacity:1; }
+      .wolf-crt-screen.beam-release .wolf-crt-ray { animation:wolf-crt-raster-release .7s ease-in var(--release-delay) both; transform:scaleX(1); }
+      .wolf-crt-bezel { z-index:9; }
       .wolf-crt-boot { align-items:center; background:#07110c; color:#8df8a8; display:flex; font:700 clamp(10px,1.15vw,18px)/1.5 ui-monospace,monospace; justify-content:center; letter-spacing:.08em; text-shadow:0 0 8px #6cff91; }
       .wolf-crt-boot[hidden],.wolf-crt-screen iframe[hidden] { display:none; }
-      .wolf-crt-bezel { border:3px solid #171a18; box-shadow:inset 0 0 20px #000,0 0 10px #59e7ef3d; inset:0; pointer-events:none; position:absolute; z-index:5; }
+      .wolf-crt-bezel { border:3px solid #171a18; box-shadow:inset 0 0 20px #000,0 0 10px #59e7ef3d; inset:0; pointer-events:none; position:absolute; z-index:9; }
       .wolf-crt-status { height:1px; overflow:hidden; position:absolute; width:1px; clip-path:inset(50%); }
       @keyframes wolf-crt-scan { to { top:110%; } }
-      @media(prefers-reduced-motion:reduce){.wolf-crt-screen,.wolf-symbol-layer{transition:none}.wolf-crt-screen::after{animation:none}}
+      @keyframes wolf-crt-ignite { 0%{opacity:0;transform:scaleX(0)} 38%{opacity:1;transform:scaleX(.14)} 72%{opacity:.94;transform:scaleX(1)} 100%{opacity:.35;transform:scaleX(.82)} }
+      @keyframes wolf-crt-raster-build { 0%{opacity:0;transform:scaleX(0)} 45%{opacity:.22;transform:scaleX(.56)} 100%{opacity:.78;transform:scaleX(1)} }
+      @keyframes wolf-crt-raster-ignite { 0%{background:linear-gradient(180deg,#080a0a 0 34%,#626969 46%,#202424 55%,#070909 68% 100%);box-shadow:none;opacity:.78} 28%{background:#b7ffff;box-shadow:0 0 4px #5ff5ff;opacity:1} 52%{background:#36eaf4;box-shadow:0 0 3px #64f8ff;opacity:.86} 100%{background:transparent;box-shadow:none;opacity:0} }
+      @keyframes wolf-crt-raster-dim { 0%{background:transparent;box-shadow:none;opacity:0} 34%{background:#cbd1d1;box-shadow:0 0 3px #f5ffff;opacity:.58} 58%{background:#f4f5f2;box-shadow:0 0 4px #fff;opacity:.82} 100%{background:linear-gradient(180deg,#060808 0 34%,#555d5d 46%,#191d1d 55%,#050707 68% 100%);box-shadow:none;opacity:.84} }
+      @keyframes wolf-crt-raster-release { 0%{opacity:.84;transform:scaleX(1)} 32%{opacity:.45;transform:scaleX(.86)} 58%{opacity:.78;transform:scaleX(.54)} 100%{opacity:0;transform:scaleX(0)} }
+      .wolf-crt-screen::before,.wolf-crt-screen::after { opacity:0; transition:opacity .34s ease; }
+      .wolf-crt-screen.display-live::before,.wolf-crt-screen.display-live::after { opacity:1; }
+      .wolf-crt-screen iframe { clip-path:polygon(50% 50%,50% 50%,50% 50%,50% 50%); opacity:0; }
+      .wolf-crt-screen.game-revealing iframe,.wolf-crt-screen.display-live iframe { opacity:1; }
+      .wolf-crt-screen.beam-hold .wolf-crt-phosphor { opacity:1; }
+      .wolf-crt-screen.beam-hold .wolf-crt-ray { background:linear-gradient(180deg,transparent 0 35%,#747979 47%,#333737 58%,transparent 70% 100%); opacity:.58; transform:scaleX(1); }
+      .wolf-crt-boot { display:none!important; }
+      .wolf-crt-screen.compositor-active { background:transparent!important; }
+      .wolf-crt-screen.compositor-active::before,.wolf-crt-screen.compositor-active::after { opacity:0!important; }
+      .wolf-crt-screen.crt-filter-active::before { opacity:1!important; transition:opacity .46s ease; }
+      .wolf-crt-screen.crt-filter-active::after { opacity:.72!important; transition:opacity .46s ease; }
+      .wolf-crt-screen.compositor-active iframe { opacity:0!important; clip-path:none!important; }
+      .wolf-crt-screen.compositor-live iframe { opacity:1!important; clip-path:none!important; }
+      .wolf-crt-compositor { display:none; image-rendering:pixelated; inset:0; pointer-events:none; position:absolute; width:100%; height:100%; z-index:2; }
+      .wolf-crt-screen.compositor-active .wolf-crt-compositor { display:block; }
+      @media(prefers-reduced-motion:reduce){.wolf-crt-screen,.wolf-symbol-layer{transition:none}.wolf-crt-screen::after{animation:none}.wolf-crt-phosphor,.wolf-crt-ray,.wolf-crt-phosphor::after{animation:none!important}}
       .game-menu { background:rgba(7,21,32,.82); border:1px solid rgba(229,191,116,.5); color:#f2dca8; left:50%; min-width:min(380px,60%); padding:8px 20px 7px; pointer-events:none; position:absolute; text-align:center; top:34.5%; transform:translateX(-50%); z-index:14; }
       .game-menu strong { display:block; font:600 clamp(13px,1.35vw,21px)/1.15 Georgia,serif; letter-spacing:.06em; }
       .game-menu small { color:#a8dbe5; display:block; font-size:clamp(9px,.82vw,13px); margin-top:3px; }
+      .game-scores { border-top:1px solid #d7ad6466; margin-top:7px; padding-top:5px; }
+      .game-scores b { color:#f5ca80; font:700 10px/1.2 ui-monospace,monospace; letter-spacing:.16em; }
+      .game-scores ol { columns:2; font:600 10px/1.35 ui-monospace,monospace; list-style-position:inside; margin:4px 0 0; padding:0; text-align:left; }
+      .score-entry { background:#071520; border:1px solid #e5bf74; border-radius:8px; color:#f2dca8; padding:20px; text-align:center; }
+      .score-entry::backdrop { background:#02070bcc; } .score-entry input { background:#0d2635; border:1px solid #69d7e8; color:#fff1bd; font:700 28px/1 ui-monospace,monospace; letter-spacing:.25em; padding:8px; text-align:center; text-transform:uppercase; width:6ch; }
+      .score-entry button { background:#17394a; border:1px solid #d7ad64; color:#fff1bd; cursor:pointer; margin:12px 4px 0; padding:7px 12px; }
       .game-menu[data-mode="playing"] { background:rgba(7,21,32,.62); border-color:rgba(101,210,230,.2); min-width:0; padding:4px 12px; }
       .game-menu[data-mode="playing"] strong { display:none; }
       .game-menu[data-mode="playing"] small { margin:0; opacity:.82; }
@@ -167,18 +214,19 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
       ${futureMotion ? `<div class="future-motion-layer" aria-hidden="true"><img class="future-motion-source" src="${backgroundUrl}" alt="" draggable="false"><canvas class="future-motion-canvas" width="1672" height="941"></canvas><canvas class="future-motion-mask" width="1672" height="941" hidden></canvas><canvas class="future-motion-symbol" width="1672" height="941"></canvas><canvas class="future-motion-tower" width="1672" height="941"></canvas><canvas class="future-motion-feature" width="1672" height="941"></canvas></div>` : ''}
       ${carousel ? '<canvas class="wolf-symbol-light" id="wolfSymbolLight" width="1672" height="941" aria-hidden="true"></canvas><div class="wolf-crt-screen" id="wolfCrtScreen"><div class="wolf-crt-boot" id="wolfCrtBoot">WOLF3D CRT BOOT...</div><iframe id="wolfFrame" title="Wolfenstein 3D" hidden allow="autoplay; fullscreen"></iframe><div class="wolf-crt-bezel" aria-hidden="true"></div></div><output class="wolf-crt-status" id="wolfCrtStatus" aria-live="polite"></output>' : ''}
       ${interactive ? '<svg id="sceneGame" class="scene-game-layer" viewBox="0 0 1672 941" aria-label="Interactive table puzzle"></svg>' : ''}
-      ${carousel ? '<div class="game-menu" id="gameMenu"><strong id="gameTitle"></strong><small id="gameDetail"></small></div><output class="scene-audio-status" id="sceneAudioStatus" aria-live="polite">Calm Ether</output>' : ''}
+      ${carousel ? '<div class="game-menu" id="gameMenu"><strong id="gameTitle"></strong><small id="gameDetail"></small><div class="game-scores" id="gameScores" hidden><b>TOP 10</b><ol id="gameScoreList"></ol></div></div><output class="scene-audio-status" id="sceneAudioStatus" aria-live="polite">Calm Ether</output>' : ''}
       ${futureMotion ? '<svg class="qr-current" viewBox="0 0 1672 941" aria-hidden="true"><path pathLength="100" d="M 451 377 L 1190 377 L 1402 721 L 168 721 Z"/><path pathLength="100" d="M 451 377 L 1190 377 L 1402 721 L 168 721 Z"/></svg>' : ''}
     </div>
+    ${carousel ? '<dialog class="score-entry" id="scoreEntry"><form id="scoreForm" method="dialog"><h2>TOP 10 SCORE</h2><p id="scoreMessage"></p><label>Three initials <input id="scoreInitials" maxlength="3" pattern="[A-Za-z]{3}" autocomplete="off" required></label><div><button type="submit">SAVE SCORE</button><button type="button" id="scoreSkip">SKIP</button></div></form></dialog>' : ''}
     <div class="qr-overlay ${futureMotion ? 'theme-qr' : ''}" id="scanOverlay" hidden><div class="qr scan"><img id="scanImage" alt=""><div class="qr-mark" aria-hidden="true">Z</div></div></div>
     ${firewall?.enabled ? `<div class="qr-overlay ${futureMotion ? 'theme-qr' : ''}" id="firewallOverlay" hidden><div class="qr scan" aria-label="Firewall sign-in QR code"></div></div>` : ''}
     <script nonce="${scriptNonce}" src="/scene-framing.js?v=23"></script>
-    ${interactive ? `<script nonce="${scriptNonce}" src="/scene-game.js?v=36"></script>` : ''}
-    ${carousel ? `<script nonce="${scriptNonce}" src="/future-game-carousel.js?v=52"></script><script nonce="${scriptNonce}" src="/future-nature-audio.js?v=46"></script><script nonce="${scriptNonce}" src="/future-sample-audio.js?v=48"></script>` : ''}
+    ${interactive ? `<script nonce="${scriptNonce}" src="/scene-game.js?v=60"></script>` : ''}
+    ${carousel ? `<script nonce="${scriptNonce}" src="/future-game-carousel.js?v=66"></script><script nonce="${scriptNonce}" src="/future-nature-audio.js?v=46"></script><script nonce="${scriptNonce}" src="/future-sample-audio.js?v=48"></script>` : ''}
     ${bundledMotion ? `<script nonce="${scriptNonce}" src="/scene-motion.js?v=15"></script>` : ''}
     ${futureMotion ? `<script nonce="${scriptNonce}" src="/future-motion-runtime.js?v=41"></script>` : ''}
     ${futureMotion ? `<script nonce="${scriptNonce}" src="/future-feature-clicks.js?v=48"></script>` : ''}
-    ${carousel ? `<script nonce="${scriptNonce}" src="/future-wolf3d-crt.js?v=53g"></script>` : ''}
+    ${carousel ? `<script nonce="${scriptNonce}" src="/future-wolf3d-crt.js?v=78"></script>` : ''}
     <script nonce="${scriptNonce}">
       ${bundledMotion ? `{
         const canvas = document.querySelector('.scene-motion-canvas');
@@ -197,10 +245,10 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
       }` : ''}
       const scene = document.querySelector('.scene');
       ${interactive && !carousel ? `window.SceneGame.mount(document.getElementById('sceneGame'));` : ''}
-      ${carousel ? `const natureAudio=FutureNatureAudio.mount({target:document});natureAudio.setLayer('waterfall',1);natureAudio.setLayer('wind',1);natureAudio.setLayer('chimes',1);natureAudio.setTrack('none');const sampleAudio=FutureSampleAudio.mount({target:document,defaultSample:'ether'});const gameCarousel=FutureGameCarousel.mount({svg:document.getElementById('sceneGame'),target:scene,image:document.querySelector('.future-motion-source'),title:document.getElementById('gameTitle'),detail:document.getElementById('gameDetail'),onGameSound:(kind,detail)=>natureAudio.gameCue(kind,detail)});const audioStatus=document.getElementById('sceneAudioStatus');let starClickTimer=0;const isCenterStar=(event)=>{const box=scene.getBoundingClientRect(),x=(event.clientX-box.left)*1672/box.width,y=(event.clientY-box.top)*941/box.height;return Math.hypot(x-820,y-729)<=42;};scene.addEventListener('click',(event)=>{if(!isCenterStar(event))return;clearTimeout(starClickTimer);starClickTimer=setTimeout(()=>{const next=sampleAudio.cycle();audioStatus.value=next.name;starClickTimer=0;},260);});scene.addEventListener('dblclick',(event)=>{if(!isCenterStar(event))return;event.preventDefault();clearTimeout(starClickTimer);starClickTimer=0;const state=sampleAudio.state();if(state.playing){sampleAudio.pause();audioStatus.value='Background music off';}else{sampleAudio.play();audioStatus.value='Background music on';}});` : ''}
+      ${carousel ? `const natureAudio=FutureNatureAudio.mount({target:document});natureAudio.setLayer('waterfall',1);natureAudio.setLayer('wind',1);natureAudio.setLayer('chimes',1);natureAudio.setTrack('none');const sampleAudio=FutureSampleAudio.mount({target:document,defaultSample:'ether'});let wolfCrt;const gameCarousel=FutureGameCarousel.mount({svg:document.getElementById('sceneGame'),target:scene,image:document.querySelector('.future-motion-source'),title:document.getElementById('gameTitle'),detail:document.getElementById('gameDetail'),scoreboard:document.getElementById('gameScores'),scoreList:document.getElementById('gameScoreList'),scoreDialog:document.getElementById('scoreEntry'),scoreForm:document.getElementById('scoreForm'),scoreInitials:document.getElementById('scoreInitials'),scoreMessage:document.getElementById('scoreMessage'),scoreSkip:document.getElementById('scoreSkip'),onMastery:()=>wolfCrt?.reveal('WL6'),onGameSound:(kind,detail)=>natureAudio.gameCue(kind,detail)});const audioStatus=document.getElementById('sceneAudioStatus');let starClickTimer=0;const isCenterStar=(event)=>{const box=scene.getBoundingClientRect(),x=(event.clientX-box.left)*1672/box.width,y=(event.clientY-box.top)*941/box.height;return Math.hypot(x-820,y-729)<=42;};scene.addEventListener('click',(event)=>{if(!isCenterStar(event))return;clearTimeout(starClickTimer);starClickTimer=setTimeout(()=>{const next=sampleAudio.cycle();audioStatus.value=next.name;starClickTimer=0;},260);});scene.addEventListener('dblclick',(event)=>{if(!isCenterStar(event))return;event.preventDefault();clearTimeout(starClickTimer);starClickTimer=0;const state=sampleAudio.state();if(state.playing){sampleAudio.pause();audioStatus.value='Background music off';}else{sampleAudio.play();audioStatus.value='Background music on';}});` : ''}
       ${futureMotion ? `window.FutureMotion.mount(document.querySelector('.future-motion-layer'), { interactionTarget: scene });` : ''}
       ${futureMotion ? `window.FutureFeatureClicks.mount({ image: document.querySelector('.future-motion-source'), canvas: document.querySelector('.future-motion-feature'), target: scene });` : ''}
-      ${carousel ? `const wolfCrt=FutureWolfCrt.mount({scene,screen:document.getElementById('wolfCrtScreen'),iframe:document.getElementById('wolfFrame'),boot:document.getElementById('wolfCrtBoot'),status:document.getElementById('wolfCrtStatus'),image:document.querySelector('.future-motion-source'),lightCanvas:document.getElementById('wolfSymbolLight'),wolfUrl:'/wolf3d/?game=WL6&crt=53g',sodUrl:'/wolf3d/?game=SOD&crt=53g',onExit:(direction)=>direction<0?gameCarousel.previous():gameCarousel.next(),onZoom:(factor,x,y)=>zoomAt(camera.zoom*factor,x,y)});` : ''}
+      ${carousel ? `wolfCrt=FutureWolfCrt.mount({scene,screen:document.getElementById('wolfCrtScreen'),iframe:document.getElementById('wolfFrame'),boot:document.getElementById('wolfCrtBoot'),status:document.getElementById('wolfCrtStatus'),image:document.querySelector('.future-motion-source'),lightCanvas:document.getElementById('wolfSymbolLight'),wolfUrl:'/wolf3d/?game=WL6&crt=68',sodUrl:'/wolf3d/?game=SOD&crt=68',onExit:(direction)=>direction<0?gameCarousel.previous():gameCarousel.next(),onZoom:(factor,x,y)=>zoomAt(camera.zoom*factor,x,y)});if(['localhost','127.0.0.1','::1'].includes(location.hostname)){const panel=document.createElement('aside');panel.id='arcadeWinHarness';panel.style.cssText='position:fixed;z-index:10000;right:10px;top:10px;max-width:310px;padding:10px;background:#071520ee;border:1px solid #e5bf74;color:#fff1bd;font:12px ui-monospace,monospace';panel.innerHTML='<b>LOCAL WIN HARNESS</b><p>Uses real score and reward controllers.</p>';const actions=[['2048 Fusion','fusion'],['2048 Standard','classic2048'],['Lights Out','lights'],['Treasure Path','treasure'],["Knight’s Tour",'knight'],['Peg Solitaire','pegs'],['Orbital Reversi','reversi'],['Four in a Row','four'],['Celestial Circuit','circuit'],['Wolf → Spear','reward:SOD'],['Spear → Menu','reward:MENU']];for(const[label,action]of actions){const button=document.createElement('button');button.type='button';button.textContent=label;button.style.cssText='margin:3px;padding:5px;background:#17394a;border:1px solid #d7ad64;color:#fff1bd';button.onclick=()=>action.startsWith('reward:')?wolfCrt.testReward(action.slice(7)):gameCarousel.testFinish(action);panel.append(button);}document.body.append(panel);window.arcadeWinHarness={finish:(game)=>gameCarousel.testFinish(game),reward:(target)=>wolfCrt.testReward(target)};}` : ''}
       const scanOverlay = document.querySelector('#scanOverlay');
       const scanCard = scanOverlay.querySelector('.qr.scan');
       const scanImage = document.querySelector('#scanImage');
@@ -426,7 +474,7 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
         camera.moved = true;
         paintCamera();
       });
-      scanImage.addEventListener('error', () => location.reload());
+      scanImage.addEventListener('error', () => { closeQrOverlay(scanOverlay); scanImage.removeAttribute('src'); });
       function openFirewallHandoff(status) {
         if (status.action !== ${JSON.stringify(new URL('_handoff', DESTINATIONS.firewall.publicRoute).href)}
           || !/^[A-Za-z0-9_-]{43}$/.test(status.handoff || '')) return;
@@ -455,8 +503,8 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
           }).catch(() => {}), 1500);
         setTimeout(() => clearInterval(poll), 900000);
       }
-      const portalPoll = setInterval(() => fetch('/challenge/current', { credentials: 'same-origin' }).then((response) => response.json()).then((result) => { if (result.redirect) location = result.redirect; }).catch(() => {}), 1500);
-      setTimeout(() => location.reload(), 900000);
+      const portalPoll = setInterval(() => fetch('/challenge/current', { credentials: 'same-origin' }).then((response) => response.json()).then((result) => { if (result.terminal) { clearInterval(portalPoll); return; } if (result.redirect) location = result.redirect; }).catch(() => {}), 1500);
+      // QR expiry is enforced by the challenge endpoints; never expire the Arcade page.
     </script>
   </body>
 </html>`;

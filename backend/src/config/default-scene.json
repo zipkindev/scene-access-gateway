@@ -23,5 +23,8 @@
       "visible": false,
       "enabled": true
     }
-  ]
+  ],
+  "display": {
+    "title": "ZArcade"
+  }
 }
