@@ -151,8 +151,8 @@ function validateScene(input, backgrounds = BACKGROUNDS, allowedDestinations = [
     if (typeof hotspot.visible !== 'boolean' || typeof hotspot.enabled !== 'boolean') throw new Error('invalid hotspot state');
     if (hotspot.sequence !== undefined) {
       exactKeys(hotspot.sequence, ['steps', 'maxGapSeconds', 'totalSeconds'], 'hotspot sequence');
-      if (!Array.isArray(hotspot.sequence.steps) || hotspot.sequence.steps.length < 1 || hotspot.sequence.steps.length > 4) {
-        throw new Error('sequence requires two to five click points');
+      if (!Array.isArray(hotspot.sequence.steps) || hotspot.sequence.steps.length < 1 || hotspot.sequence.steps.length > 9) {
+        throw new Error('sequence requires two to ten click points');
       }
       for (const step of hotspot.sequence.steps) {
         exactKeys(step, ['x', 'y', 'radius'], 'sequence point');

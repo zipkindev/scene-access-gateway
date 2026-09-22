@@ -42,6 +42,22 @@ test('scene validation refuses public text, arbitrary destinations, and duplicat
   assert.equal(validateScene(firewall, BACKGROUNDS, ['torrentharbor', 'firewall']).hotspots.length, 2);
 });
 
+test('scene validation permits ten-click sequences and rejects an eleventh point', () => {
+  const scene = structuredClone(DEFAULT_SCENE);
+  scene.hotspots[0].sequence = {
+    steps: Array.from({ length: 9 }, (_, index) => ({
+      x: 0.1 + (index % 5) * 0.16,
+      y: 0.65 + Math.floor(index / 5) * 0.15,
+      radius: 0.02,
+    })),
+    maxGapSeconds: 8,
+    totalSeconds: 30,
+  };
+  assert.equal(validateScene(scene).hotspots[0].sequence.steps.length + 1, 10);
+  scene.hotspots[0].sequence.steps.push({ x: 0.9, y: 0.9, radius: 0.02 });
+  assert.throws(() => validateScene(scene), /two to ten click points/);
+});
+
 test('authored wide and portrait frames are image-relative and aspect locked', () => {
   const scene = structuredClone(DEFAULT_SCENE);
   const aspect = BACKGROUNDS[scene.backgroundId].width / BACKGROUNDS[scene.backgroundId].height;

@@ -52,7 +52,7 @@ header{flex:none;width:min(1800px,calc(100% - 36px));padding:18px 4px 14px}
     <details class="collapsed-section" id="revisionsPanel"><summary>Scene revisions</summary><p>Each row is a distinct published scene, including its background, viewport, hotspots, and click sequences. Restore switches the live scene to that saved version without making a duplicate. Older duplicate records are retained but hidden here.</p><div id="history"></div></details>
     <label class="field">Hotspot<select id="hotspotSelect"></select></label>
     <label class="field">QR activation<select id="unlockMode"><option value="single">Single hotspot</option><option value="sequence">Ordered click sequence</option></select></label>
-    <div class="sequence-controls" id="sequenceControls" hidden><p>Select a numbered point, then drag its ring on the image. Click the points in order to open this destination's QR.</p><label class="field">Point to place<select id="sequencePointSelect"></select></label><div class="sequence-actions"><button id="addSequencePoint" type="button">Add point</button><button id="removeSequencePoint" type="button">Remove selected point</button></div><label class="field">Maximum seconds between clicks<input id="maxGapSeconds" type="number" min="1" max="60" step="1" value="8"></label><label class="field">Maximum seconds for full sequence<input id="totalSeconds" type="number" min="2" max="180" step="1" value="30"></label></div>
+    <div class="sequence-controls" id="sequenceControls" hidden><p>Select a numbered point, then drag its ring on the image. Click the points in order to open this destination's QR. Up to 10 points are supported.</p><label class="field">Point to place<select id="sequencePointSelect"></select></label><div class="sequence-actions"><button id="addSequencePoint" type="button">Add point</button><button id="removeSequencePoint" type="button">Remove selected point</button></div><label class="field">Maximum seconds between clicks<input id="maxGapSeconds" type="number" min="1" max="60" step="1" value="8"></label><label class="field">Maximum seconds for full sequence<input id="totalSeconds" type="number" min="2" max="180" step="1" value="30"></label></div>
     <div class="field"><span id="coordinateLabel">Hotspot coordinates</span><div class="coordinates"><input id="x" type="number" min="0" max="1" step=".001"><input id="y" type="number" min="0" max="1" step=".001"><input id="radius" type="number" min=".005" max=".25" step=".001"></div></div>
     <label class="field">Maximum zoom<input id="maximumZoom" type="number" min="1" max="8" step=".1"></label>
     <label class="field">Available Hotspot Destinations<select id="destinationSelect"></select></label>
@@ -70,6 +70,6 @@ header{flex:none;width:min(1800px,calc(100% - 36px));padding:18px 4px 14px}
 <script src="/future-motion-runtime.js?v=41"></script>
 <script src="/future-feature-clicks.js?v=43"></script>
 <script src="/future-game-carousel.js?v=46"></script>
-<script src="/admin.js?v=79"></script>
+<script src="/admin.js?v=80"></script>
 </body>
 </html>
