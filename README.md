@@ -32,8 +32,11 @@ security boundaries and behavior.
   destination hotspots, QR challenges, responsive layouts, reduced-motion
   support, and optional scene interactions.
 - **Visual scene editor:** background and image management, framing profiles,
-  hotspot placement, ordered unlock sequences, previews, drafts, publishing,
-  and revision history.
+  hotspot placement, ordered unlock sequences, scene-specific browser titles,
+  previews, drafts, publishing, and revision history.
+- **Arcade continuity:** resumable local play, persistent ranked scoreboards
+  across thirteen game profiles, guarded score submission, and extension-side
+  Wolf/Spear competition contracts.
 - **Identity integration:** narrowly scoped Authentik lookups and management
   operations, email verification, destination membership, and signed portal
   assertions.
@@ -200,10 +203,12 @@ deploying the gateway publicly.
 
 The repository contains the canonical source, separated frontend and backend
 images, portable Compose definitions, exact asset manifests, and documented
-behavioral parity gates. Local builds and smoke tests pass. A production
+behavioral parity gates. Its portable code is synchronized with the reusable
+behavior of verified release 78, while production topology and local licensed
+content remain excluded. Local builds and smoke tests pass. A production
 replacement is intentionally gated on the remaining items in the
 [release checklist](docs/RELEASE-CHECKLIST.md) and the
-[production parity record](docs/migration/production-53g.md).
+[production parity record](docs/migration/production-parity.md).
 
 For ongoing work, follow the
 [local development and Git synchronization guide](docs/maintenance/local-development.md).

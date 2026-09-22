@@ -20,6 +20,19 @@ excludes:
 The pre-public repository state is preserved as a protected local Git bundle,
 not as a branch or tag on the public remote.
 
+## Release-78 synchronization
+
+The portable source is synchronized with the reusable behavior of the
+verified release-78 application manifest. This includes persistent Arcade
+leaderboards, resumable and ranked game behavior, terminal challenge polling,
+scene-specific browser titles, and the main-side contracts required by the
+separate Wolf extension.
+
+Production topology and local content were not copied. Exact Wolf controller
+and uWolf runtime changes live in the GPL extension repository; commercial
+datasets and raw third-party audio remain ignored local inputs. See the
+[synchronization procedure](../maintenance/release-synchronization.md).
+
 ## Parity gates
 
 Before replacing a production deployment, verify:

@@ -20,7 +20,7 @@ SAG_EDITOR_ORIGIN="http://localhost:$smoke_editor_port" \
 docker compose -p "$smoke_project" -f "$repository_root/compose.yaml" up -d --wait
 
 curl -fsS "http://127.0.0.1:$smoke_port/healthz" >/dev/null
-curl -fsS "http://127.0.0.1:$smoke_port/" | grep -q '<title>Access</title>'
+curl -fsS "http://127.0.0.1:$smoke_port/" | grep -q '<title>ZArcade</title>'
 curl -fsS "http://127.0.0.1:$smoke_port/assets/rain-city-qr-embossed-v6.png" >/dev/null
 if [ -f "$repository_root/frontend/artwork/audio/freesound_community-calm-loop-80576.mp3" ]; then
   curl -fsS "http://127.0.0.1:$smoke_port/audio-samples/freesound_community-calm-loop-80576.mp3" >/dev/null

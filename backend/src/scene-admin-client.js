@@ -1,6 +1,6 @@
 'use strict';
 
-const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
+const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','browserTitle','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
 let state;
 let scene;
 let selectedIndex = 0;
@@ -278,6 +278,8 @@ function render() {
   elements.background.src = background.url || '/assets/' + background.file;
   elements.background.alt = background.id;
   elements.backgroundSelect.value = scene.backgroundId;
+  scene.display ||= { title: 'ZArcade' };
+  elements.browserTitle.value = scene.display.title;
   elements.backgroundSize.value = 'Selected image: ' + formatBytes(background.bytes) + ' · ' + (background.mediaType === 'image/webp' ? 'WebP' : 'PNG');
   renderGameControls();
   elements.optimizeImage.disabled = background.mediaType !== 'image/png';
@@ -535,12 +537,14 @@ elements.frame.addEventListener('pointerup', endPan);
 elements.frame.addEventListener('pointercancel', endPan);
 new ResizeObserver(fitFrame).observe(elements.workspace);
 new ResizeObserver(renderFocusGuide).observe(elements.focusPreview);
+elements.browserTitle.addEventListener('input', () => { scene.display = { title: elements.browserTitle.value }; });
 elements.backgroundSelect.addEventListener('change', () => {
   stopGamePreview();
-  const original = state.backgrounds.find((item) => item.id === scene.backgroundId);
   const replacement = state.backgrounds.find((item) => item.id === elements.backgroundSelect.value);
   scene.backgroundId = elements.backgroundSelect.value;
-  if (!gameCapable(original) || !gameCapable(replacement)) scene.interaction = { kind: 'none' };
+  // Re-selecting the calibrated Future table repairs legacy optimized scenes
+  // whose old editor cleared the interaction before provenance was retained.
+  scene.interaction = gameCapable(replacement) ? { kind: 'minesweeper' } : { kind: 'none' };
   scene.motion = { enabled: false, effects: {} };
   scene.viewport.frames = {};
   render();
@@ -730,6 +734,24 @@ async function imageAction(id, action) {
   elements.status.textContent = action === 'archive' ? 'Image removed from selection. Retained revisions can still use it.' : 'Image restored to selection.';
 }
 
+async function deleteImage(item) {
+  const optimized = Boolean(item.optimizedFrom);
+  if (optimized) {
+    if (!window.confirm('Permanently delete this optimized copy? This cannot be undone.')) return;
+  } else {
+    if (!window.confirm('This is an original image, not an optimized copy. Continue to the permanent-delete confirmation?')) return;
+    if (!window.confirm('PERMANENT DELETE: this original image and its stored file will be removed. This cannot be undone.')) return;
+  }
+  const response = await fetch('/api/images/' + item.id + '/purge', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Scene-CSRF': requireCsrf() },
+    body: JSON.stringify({ confirmation: optimized ? 'DELETE OPTIMIZED COPY' : 'PERMANENTLY DELETE ORIGINAL' }),
+  });
+  const result = await readWriteResponse(response);
+  if (!response.ok) throw new Error(result.error || 'Image could not be deleted');
+  await load(true);
+  elements.status.textContent = optimized ? 'Optimized copy permanently deleted.' : 'Original image permanently deleted.';
+}
+
 async function rollback(revisionId) {
   const response = await fetch('/api/rollback/' + revisionId, { method: 'POST', headers: { 'X-Scene-CSRF': requireCsrf() } });
   const result = await readWriteResponse(response);
@@ -907,13 +929,22 @@ async function load(preserveScene = false) {
     thumbnail.alt = '';
     const label = document.createElement('span');
     const used = item.id === state.imageReferences.active ? ' · active' : item.id === state.imageReferences.draft ? ' · draft' : state.imageReferences.history.includes(item.id) ? ' · in history' : '';
-    label.textContent = (item.label || item.id) + ' · ' + item.width + '×' + item.height + ' · ' + formatBytes(item.bytes) + ' · ' + (item.mediaType === 'image/webp' ? 'WebP' : 'PNG') + ' · ' + item.status + (item.bundleId ? ' · motion effects' : '') + used;
+    const compatibility = item.mediaType === 'image/webp' && item.width === 1672 && item.height === 941 && !item.optimizedFrom
+      ? ' · legacy copy · Future games unavailable' : item.optimizedFrom ? ' · optimized copy' : ' · original';
+    label.textContent = (item.label || item.id) + ' · ' + item.width + '×' + item.height + ' · ' + formatBytes(item.bytes) + ' · ' + (item.mediaType === 'image/webp' ? 'WebP' : 'PNG') + compatibility + ' · ' + item.status + (item.bundleId ? ' · motion effects' : '') + used;
     const button = document.createElement('button');
     const action = item.status === 'archived' ? 'restore' : 'archive';
-    button.textContent = action === 'archive' ? 'Archive' : 'Restore';
+    button.textContent = action === 'archive' ? 'Remove from backgrounds' : 'Restore';
     button.disabled = action === 'archive' && (item.id === state.imageReferences.active || item.id === state.imageReferences.draft);
     button.addEventListener('click', () => imageAction(item.id, action).catch((error) => { elements.status.textContent = error.message; }));
-    row.append(thumbnail, label, button);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = 'Delete permanently';
+    const referenced = item.id === state.imageReferences.active || item.id === state.imageReferences.draft || state.imageReferences.history.includes(item.id);
+    remove.disabled = referenced;
+    remove.title = referenced ? 'Remove this image from the active scene, draft, and saved revisions before permanent deletion.' : '';
+    remove.addEventListener('click', () => deleteImage(item).catch((error) => { elements.status.textContent = error.message; }));
+    row.append(thumbnail, label, button, remove);
     return row;
   }));
   elements.history.replaceChildren(...state.history.map((item) => {
