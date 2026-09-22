@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "license": "Pixabay Content License",
+  "licenseUrl": "https://pixabay.com/service/license-summary/",
+  "distribution": "Manifest only. Raw MP3 files are optional local inputs and are excluded from Git.",
+  "defaultSample": "ether",
+  "samples": [
+    {
+      "id": "ether",
+      "name": "Calm Ether",
+      "filename": "gigidelaromusic-calm-ether-loop-short-450954.mp3",
+      "creator": "GigiDeLaRoMusic",
+      "sourceUrl": "https://pixabay.com/sound-effects/musical-calm-ether-loop-short-450954/",
+      "bytes": 309289,
+      "sha256": "dedb21d9703a8df3b0438447af8ae823f9e6e615c56828575d7ede60a9f5685e",
+      "loop": { "start": 0.1, "end": 9.6 }
+    },
+    {
+      "id": "delightful",
+      "name": "Delightful Loop",
+      "filename": "grumpynora-delightful-loop-380173.mp3",
+      "creator": "Grumpynora",
+      "sourceUrl": "https://pixabay.com/sound-effects/delightful-loop-380173/",
+      "bytes": 439693,
+      "sha256": "f693bb61d7dbc2f367d4e793469b3309b8cc872b6f9043e80e89e9c3524fcba1",
+      "loop": { "start": 1.7, "end": 12 }
+    },
+    {
+      "id": "piano",
+      "name": "Ambient Piano",
+      "filename": "freesound_community-ambient-piano-loop-85bpm-40993.mp3",
+      "creator": "deleted_user_11009121 (Freesound)",
+      "sourceUrl": "https://pixabay.com/sound-effects/musical-ambient-piano-loop-85bpm-40993/",
+      "bytes": 227520,
+      "sha256": "3bb46436bb2277b68d3d9acfee816d94829ba7ad06c988b087cfd7490070f43b",
+      "loop": { "start": 0, "end": null }
+    },
+    {
+      "id": "calm",
+      "name": "Calm Loop",
+      "filename": "freesound_community-calm-loop-80576.mp3",
+      "creator": "DragonTrance (Freesound)",
+      "sourceUrl": "https://pixabay.com/sound-effects/musical-calm-loop-80576/",
+      "bytes": 101280,
+      "sha256": "9a6fa7efde06aca985e11234cd3c8eb9d980daa8f95f2443f4228c5a5f0db07e",
+      "loop": { "start": 0, "end": 5 }
+    },
+    {
+      "id": "neuro",
+      "name": "Ambient Neuro",
+      "filename": "freesound_community-ambient-neuro-bass-beat-27709.mp3",
+      "creator": "Bertsz (Freesound)",
+      "sourceUrl": "https://pixabay.com/sound-effects/musical-ambient-neuro-bass-beat-27709/",
+      "bytes": 960960,
+      "sha256": "2f3be606eea0adf6836f865c27b63fb2a8e05c9a12639a8ebd6fbd36f90aeb78",
+      "loop": { "start": 16.4, "end": 41.2 }
+    },
+    {
+      "id": "forcefield",
+      "name": "Forcefield Ambience",
+      "filename": "freesound_community-forcefield-ambience-67572.mp3",
+      "creator": "Thimblerig (Freesound)",
+      "sourceUrl": "https://pixabay.com/sound-effects/film-special-effects-forcefield-ambience-67572/",
+      "bytes": 1167840,
+      "sha256": "c9b0ff0dfa891901aaf8b5586546ddcffc9c5c05f04b9c6b790f6b7e6fcb837f",
+      "loop": { "start": 0, "end": null }
+    },
+    {
+      "id": "hardstyle",
+      "name": "Hardstyle Atmosphere",
+      "filename": "freesound_community-hardstyle-atmos01_fmin_150bpm-94733.mp3",
+      "creator": "Sorinious_Genious (Freesound)",
+      "sourceUrl": "https://pixabay.com/sound-effects/musical-hardstyle-atmos01-fmin-150bpm-94733/",
+      "bytes": 257280,
+      "sha256": "cea716988322bdf129bdc93977498e6d82949e45e3f027ac8b8abd865d042634",
+      "loop": { "start": 3.8, "end": 6.9 }
+    },
+    {
+      "id": "spooky",
+      "name": "Spooky Keys",
+      "filename": "freesound_community-spooky-keys-63764.mp3",
+      "creator": "IsThisUserTaken (Freesound)",
+      "sourceUrl": "https://pixabay.com/sound-effects/spooky-keys-63764/",
+      "bytes": 421920,
+      "sha256": "5643c4cd26027de76f5c1787a8370c3c186850076ad42b915516155aebc25364",
+      "loop": { "start": 0, "end": null }
+    }
+  ]
+}

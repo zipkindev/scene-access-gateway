@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "images": {
+    "node": "node:22-alpine@sha256:b6f26b36c8ff49624cfdac716b8ea1138d606df02586a77d364bb5536a634f85",
+    "nginx": "nginx:1.28-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236"
+  }
+}

@@ -1,0 +1,14 @@
+.git
+.github
+.local
+node_modules
+coverage
+docs
+migration
+*.log
+*.tar
+*.tar.gz
+*.oci
+*.WL6
+*.SOD
+

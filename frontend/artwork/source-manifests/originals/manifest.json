@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "assetId": "rain-city-qr-embossed-v6",
+  "filename": "rain-city-qr-embossed-v6.png",
+  "mediaType": "image/png",
+  "width": 1672,
+  "height": 941,
+  "sizeBytes": 2020749,
+  "sha256": "6e3f0a87a783c21ed41e95310822a537c0ee237f8a4ea708a62b0747501cd803",
+  "source": "preserved zipkin-access-portal:local image and restored portal source",
+  "interaction": {
+    "coordinateSpace": "normalized",
+    "hotspot": {"x": 0.185, "y": 0.392, "radius": 0.037},
+    "behavior": "Open the hidden live QR overlay",
+    "sceneZoom": {"minimum": 1, "maximum": 2.8, "increment": 0.12}
+  }
+}

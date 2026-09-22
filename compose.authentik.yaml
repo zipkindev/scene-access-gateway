@@ -1,0 +1,103 @@
+services:
+  postgresql:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: authentik
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    secrets:
+      - postgres-password
+    volumes:
+      - authentik_database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d authentik -U authentik"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - identity
+
+  authentik-server:
+    image: ghcr.io/goauthentik/server:${SAG_AUTHENTIK_VERSION:-2026.8.3}
+    command: ["server"]
+    environment: &authentik_environment
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: file:///run/secrets/postgres-password
+      AUTHENTIK_SECRET_KEY: file:///run/secrets/authentik-secret-key
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_OUTPOSTS__DISCOVER: "false"
+      SAG_CSRF_TRUSTED_ORIGINS: ${SAG_AUTHENTIK_CSRF_TRUSTED_ORIGINS:-http://localhost:9000}
+    secrets:
+      - postgres-password
+      - authentik-secret-key
+    volumes:
+      - authentik_data:/data
+      - ./authentik/blueprints:/blueprints/scene-access-gateway:ro
+      - ./authentik/templates/user_settings.py:/data/user_settings.py:ro
+    ports:
+      - "127.0.0.1:${SAG_AUTHENTIK_PORT:-9000}:9000"
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    shm_size: 512mb
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - identity
+      - private
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:${SAG_AUTHENTIK_VERSION:-2026.8.3}
+    command: ["worker"]
+    environment:
+      <<: *authentik_environment
+      AUTHENTIK_EMAIL__HOST: ${SAG_SMTP_HOST:-}
+      AUTHENTIK_EMAIL__PORT: ${SAG_SMTP_PORT:-587}
+      AUTHENTIK_EMAIL__USERNAME: ${SAG_SMTP_USERNAME:-}
+      AUTHENTIK_EMAIL__PASSWORD: file:///run/secrets/smtp-password
+      AUTHENTIK_EMAIL__USE_TLS: ${SAG_SMTP_USE_TLS:-true}
+      AUTHENTIK_EMAIL__USE_SSL: ${SAG_SMTP_USE_SSL:-false}
+      AUTHENTIK_EMAIL__FROM: ${SAG_SMTP_FROM:-}
+    secrets:
+      - postgres-password
+      - authentik-secret-key
+      - smtp-password
+    volumes:
+      - authentik_data:/data
+      - ./authentik/blueprints:/blueprints/scene-access-gateway:ro
+      - ./authentik/templates/user_settings.py:/data/user_settings.py:ro
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    shm_size: 512mb
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - identity
+      - identity_egress
+
+volumes:
+  authentik_database:
+  authentik_data:
+
+networks:
+  identity:
+    internal: true
+  identity_egress:
+
+secrets:
+  postgres-password:
+    file: ${SAG_POSTGRES_PASSWORD_FILE:-./.local/secrets/postgres-password}
+  authentik-secret-key:
+    file: ${SAG_AUTHENTIK_SECRET_KEY_FILE:-./.local/secrets/authentik-secret-key}
+  smtp-password:
+    file: ${SAG_SMTP_PASSWORD_FILE:-./.local/secrets/smtp-password}

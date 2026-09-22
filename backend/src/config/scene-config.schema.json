@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scene-access-gateway.invalid/schemas/scene-config-v1.json",
+  "title": "Access portal scene configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sceneId", "backgroundId", "viewport", "publicText", "hotspots"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "sceneId": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+    "backgroundId": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+    "publicText": {"const": false},
+    "viewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fit", "pan", "zoom", "minimumZoom", "maximumZoom", "zoomIncrement"],
+      "properties": {
+        "fit": {"enum": ["contain", "cover"]},
+        "pan": {"type": "boolean"},
+        "zoom": {"type": "boolean"},
+        "minimumZoom": {"type": "number", "minimum": 1, "maximum": 4},
+        "maximumZoom": {"type": "number", "minimum": 1, "maximum": 8},
+        "zoomIncrement": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+      }
+    },
+    "hotspots": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "shape", "x", "y", "radius", "destinationId", "activation", "visible", "enabled"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+          "shape": {"const": "circle"},
+          "x": {"type": "number", "minimum": 0, "maximum": 1},
+          "y": {"type": "number", "minimum": 0, "maximum": 1},
+          "radius": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.25},
+          "destinationId": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+          "activation": {"enum": ["qr-popup", "direct-session-route"]},
+          "visible": {"type": "boolean"},
+          "enabled": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

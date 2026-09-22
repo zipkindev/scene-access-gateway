@@ -1,0 +1,35 @@
+services:
+  frontend:
+    volumes:
+      - ${SAG_TRUENAS_NGINX_CONFIG:?Set a protected local Nginx configuration path}:/etc/nginx/nginx.conf:ro
+      - ${SAG_TLS_DIR:?Set a protected local TLS directory}:/run/access-tls:ro
+      - ${SAG_ADMIN_AUTH_DIR:?Set a protected local editor-auth directory}:/run/access-admin:ro
+
+  backend:
+    environment:
+      PUBLIC_ORIGIN: ${SAG_PUBLIC_ORIGIN:?Set the public portal origin}
+      ADMIN_ORIGIN: ${SAG_EDITOR_ORIGIN:?Set the private editor origin}
+      FIREWALL_ORIGIN: ${SAG_FIREWALL_ORIGIN:?Set the firewall gateway origin}
+      FIREWALL_UPSTREAM: ${SAG_FIREWALL_UPSTREAM:?Set the protected firewall upstream}
+      FIREWALL_UPSTREAM_IP: ${SAG_FIREWALL_UPSTREAM_IP:?Set the protected firewall address}
+      FIREWALL_TLS_NAME: ${SAG_FIREWALL_TLS_NAME:?Set the firewall TLS name}
+      TORRENTHARBOR_PUBLIC_ROUTE: ${SAG_TORRENTHARBOR_PUBLIC_ROUTE:?Set the public application route}
+      TORRENTHARBOR_UPSTREAM: ${SAG_TORRENTHARBOR_UPSTREAM:?Set the protected application upstream}
+      TORRENTHARBOR_TLS_NAME: ${SAG_TORRENTHARBOR_TLS_NAME:?Set the application TLS name}
+      MANAGEMENT_SOURCE_IP: ${SAG_MANAGEMENT_SOURCE_IP:?Set the trusted management source}
+      PORTAL_OWNER_USERNAME: ${SAG_PORTAL_OWNER_USERNAME:?Set the portal owner username}
+    secrets:
+      - smtp-env
+      - authentik-api-token
+      - authentik-management-token
+      - portal-signing-key
+
+secrets:
+  smtp-env:
+    file: ${SAG_SMTP_CONFIG_FILE:?Set the protected SMTP configuration path}
+  authentik-api-token:
+    file: ${SAG_AUTHENTIK_API_TOKEN_FILE:?Set the protected Authentik reader token path}
+  authentik-management-token:
+    file: ${SAG_AUTHENTIK_MANAGEMENT_TOKEN_FILE:?Set the protected Authentik management token path}
+  portal-signing-key:
+    file: ${SAG_PORTAL_SIGNING_KEY_FILE:?Set the protected assertion key path}

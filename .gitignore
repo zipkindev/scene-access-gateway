@@ -1,0 +1,26 @@
+.env
+.env.*
+!.env.example
+.local/
+.local.*/
+node_modules/
+backend/src/assets/
+backend/src/audio-samples/
+frontend/artwork/audio/*.mp3
+coverage/
+dist/
+build/
+*.key
+*.pem
+*.p12
+*.db
+*.sqlite*
+*.tar
+*.tar.gz
+*.oci
+*.log
+__pycache__/
+
+# Commercial game data is never part of this repository.
+*.WL6
+*.SOD

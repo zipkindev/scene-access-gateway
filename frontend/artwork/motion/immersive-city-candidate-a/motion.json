@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "sceneId": "immersive-city-candidate-a",
+  "designSize": {"width": 1672, "height": 941},
+  "enabled": false,
+  "effects": [
+    {
+      "id": "clouds-upper",
+      "kind": "image-loop",
+      "file": "clouds-upper.png",
+      "enabled": true,
+      "zIndex": 1,
+      "opacity": 0.22,
+      "animation": {"name": "drift-x", "durationSeconds": 78, "distanceXPercent": 5, "alternate": true}
+    },
+    {
+      "id": "fog-near",
+      "kind": "image-loop",
+      "file": "fog-near.png",
+      "enabled": true,
+      "zIndex": 3,
+      "opacity": 0.28,
+      "animation": {"name": "drift-x", "durationSeconds": 42, "distanceXPercent": -8, "alternate": true}
+    },
+    {
+      "id": "rain",
+      "kind": "image-loop",
+      "file": "rain.png",
+      "enabled": true,
+      "zIndex": 5,
+      "opacity": 0.32,
+      "animation": {"name": "fall", "durationSeconds": 2.8, "distanceYPercent": 100, "linear": true}
+    },
+    {
+      "id": "water-reflections",
+      "kind": "image-loop",
+      "file": "water-reflections.png",
+      "enabled": true,
+      "zIndex": 2,
+      "opacity": 0.16,
+      "animation": {"name": "ripple-x", "durationSeconds": 9, "distanceXPercent": 2, "alternate": true}
+    },
+    {
+      "id": "city-glow",
+      "kind": "procedural",
+      "enabled": true,
+      "zIndex": 2,
+      "opacity": 0.18,
+      "animation": {"name": "pulse", "durationSeconds": 11, "alternate": true}
+    },
+    {
+      "id": "train",
+      "kind": "path-sprite",
+      "file": "train.png",
+      "enabled": false,
+      "zIndex": 2,
+      "requires": ["trainless-base-plate", "track-occlusion-mask"],
+      "animation": {"name": "track-path", "durationSeconds": 26, "linear": true}
+    }
+  ],
+  "fallback": {"reducedMotion": "freeze", "smallScreen": "disable-rain-and-train"}
+}

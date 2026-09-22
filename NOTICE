@@ -1,0 +1,18 @@
+Scene Access Gateway
+Copyright 2026 Scene Access Gateway contributors
+
+The software, configuration, scripts, and documentation in this repository are
+licensed under the Apache License, Version 2.0, except where a file or directory
+states otherwise.
+
+Project-generated artwork identified in frontend/artwork/LICENSE.md is offered
+under the Creative Commons Attribution 4.0 International license (CC BY 4.0).
+
+Optional audio identified under frontend/artwork/audio is third-party content
+governed by the Pixabay Content License. Raw files are not distributed through
+Git and are not relicensed under Apache-2.0 or CC BY 4.0. See
+frontend/artwork/SOURCES.md and frontend/artwork/audio/manifest.json.
+
+The optional Wolfenstein 3D/Spear extension is maintained in the separate
+scene-access-gateway-wolf3d repository under GPL-3.0. Commercial game data is
+not part of this repository or the extension.

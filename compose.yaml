@@ -1,0 +1,91 @@
+name: scene-access-gateway
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: ${SAG_IMAGE_NAMESPACE:-scene-access-gateway}/frontend:${SAG_IMAGE_TAG:-dev}
+    ports:
+      - "127.0.0.1:${SAG_HTTP_PORT:-8080}:8080"
+      - "127.0.0.1:${SAG_EDITOR_PORT:-8081}:8081"
+    read_only: true
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=1770
+      - /var/cache/nginx:uid=101,gid=101,mode=0750
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - ingress
+      - private
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: ${SAG_IMAGE_NAMESPACE:-scene-access-gateway}/backend:${SAG_IMAGE_TAG:-dev}
+    environment:
+      PORT: "8080"
+      ADMIN_PORT: "8082"
+      ADMIN_ORIGIN: ${SAG_EDITOR_ORIGIN:-http://localhost:8081}
+      PUBLIC_ORIGIN: ${SAG_PUBLIC_ORIGIN:-http://localhost:8080}
+      FIREWALL_ORIGIN: ${SAG_FIREWALL_ORIGIN:-http://localhost:8080}
+      FIREWALL_UPSTREAM: ${SAG_FIREWALL_UPSTREAM:-https://firewall.example.invalid/}
+      FIREWALL_UPSTREAM_IP: ${SAG_FIREWALL_UPSTREAM_IP:-127.0.0.1}
+      FIREWALL_TLS_NAME: ${SAG_FIREWALL_TLS_NAME:-firewall.example.invalid}
+      TORRENTHARBOR_PUBLIC_ROUTE: ${SAG_TORRENTHARBOR_PUBLIC_ROUTE:-http://localhost:8080/torrentharbor/}
+      TORRENTHARBOR_UPSTREAM: ${SAG_TORRENTHARBOR_UPSTREAM:-torrentharbor.example.invalid:443}
+      TORRENTHARBOR_TLS_NAME: ${SAG_TORRENTHARBOR_TLS_NAME:-torrentharbor.example.invalid}
+      MANAGEMENT_SOURCE_IP: ${SAG_MANAGEMENT_SOURCE_IP:-127.0.0.1}
+      PORTAL_OWNER_USERNAME: ${SAG_PORTAL_OWNER_USERNAME:-owner}
+      DATA_DIR: /var/lib/scene-access-gateway
+      SMTP_CONFIG_PATH: /run/secrets/smtp.env
+      AUTHENTIK_API_BASE_URL: ${SAG_AUTHENTIK_API_BASE_URL:-http://frontend:8080}
+      AUTHENTIK_API_TOKEN_PATH: /run/secrets/authentik-api-token
+      AUTHENTIK_MANAGEMENT_TOKEN_PATH: /run/secrets/authentik-management-token
+      AUTHENTIK_REQUIRED_GROUP: ${SAG_AUTHENTIK_REQUIRED_GROUP:-app:torrentharbor}
+      PORTAL_ASSERTION_ISSUER: ${SAG_ASSERTION_ISSUER:-http://localhost:8080}
+      PORTAL_ASSERTION_AUDIENCE: ${SAG_ASSERTION_AUDIENCE:-torrentharbor}
+      PORTAL_ASSERTION_KEY_ID: ${SAG_ASSERTION_KEY_ID:-scene-access-gateway-01}
+      PORTAL_ASSERTION_KEY_PATH: /run/secrets/portal-signing-key.pem
+      WOLF3D_ROOT: /opt/scene-access-gateway/extensions/wolf3d
+      WOLF3D_CLIENT_SCRIPT: /opt/scene-access-gateway/extensions/future-wolf3d-crt.js
+    expose:
+      - "8080"
+      - "8082"
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - portal_data:/var/lib/scene-access-gateway
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - private
+
+volumes:
+  portal_data:
+
+networks:
+  ingress:
+  private:
+    internal: true

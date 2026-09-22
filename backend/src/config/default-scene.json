@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "sceneId": "rain-city-original",
+  "backgroundId": "rain-city-qr-embossed-v6",
+  "viewport": {
+    "fit": "contain",
+    "pan": true,
+    "zoom": true,
+    "minimumZoom": 1,
+    "maximumZoom": 2.8,
+    "zoomIncrement": 0.12
+  },
+  "publicText": false,
+  "hotspots": [
+    {
+      "id": "torrentharbor",
+      "shape": "circle",
+      "x": 0.185,
+      "y": 0.392,
+      "radius": 0.037,
+      "destinationId": "torrentharbor",
+      "activation": "qr-popup",
+      "visible": false,
+      "enabled": true
+    }
+  ]
+}

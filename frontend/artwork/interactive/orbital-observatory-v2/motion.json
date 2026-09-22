@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "sceneId": "orbital-observatory-v2",
+  "base": "base.png",
+  "designSize": [1672, 941],
+  "effects": [
+    {"id": "planet", "label": "Planet atmosphere", "kind": "drift-x", "center": [0.645, 0.236], "radius": [0.075, 0.058], "amplitude": 0.0035, "speed": 0.2},
+    {"id": "ringlight", "label": "Ring light", "kind": "light", "center": [0.856, 0.364], "radius": [0.143, 0.198], "amplitude": 0.12, "speed": 0.35},
+    {"id": "floor", "label": "Gallery reflections", "kind": "flow-x", "center": [0.68, 0.84], "radius": [0.08, 0.05], "amplitude": 0.0035, "speed": 0.42},
+    {"id": "thrusters", "label": "Vessel lights", "kind": "light", "center": [0.371, 0.435], "radius": [0.058, 0.055], "amplitude": 0.16, "speed": 0.6}
+  ],
+  "reducedMotion": "still"
+}

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "sceneId": "wildlife-preserve-v2",
+  "base": "base.png",
+  "designSize": [1672, 941],
+  "effects": [
+    {"id": "river", "label": "River reflections", "kind": "flow-x", "center": [0.696, 0.549], "radius": [0.085, 0.025], "amplitude": 0.0038, "speed": 0.72},
+    {"id": "mist", "label": "Valley mist", "kind": "drift-x", "center": [0.435, 0.25], "radius": [0.115, 0.045], "amplitude": 0.0055, "speed": 0.28},
+    {"id": "bioluminescence", "label": "Forest lights", "kind": "light", "center": [0.56, 0.49], "radius": [0.15, 0.06], "amplitude": 0.13, "speed": 0.4}
+  ],
+  "reducedMotion": "still"
+}

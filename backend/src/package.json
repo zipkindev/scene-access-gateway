@@ -1,0 +1,19 @@
+{
+  "name": "scene-access-gateway-backend",
+  "version": "0.1.0-dev",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Backend service for Scene Access Gateway",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check landing.js && node --check scene-config.js && node --check scene-assets.js && node --check scene-destinations.js && node --check scene-admin.js && node --check scene-admin-client.js && node --check mail.js && node --check allowlist.js && node --check assertion.js && node --check management.js && node --check store.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "nodemailer": "10.0.10",
+    "pngjs": "5.0.0",
+    "qrcode": "^1.5.4",
+    "sharp": "0.35.4"
+  }
+}
