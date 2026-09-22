@@ -12,6 +12,8 @@ const { createDestinationDirectory } = require('./destination-directory');
 const { prepareFirewallDestination } = require('./destination-plan');
 const { getFirewallRegistration } = require('./firewall-registration');
 const { FIREWALL_PUBLIC } = require('./destination-plan');
+const { GeoIpLookup } = require('./geoip');
+const { SecurityEvents, sourceIp } = require('./security-events');
 
 const ADMIN_ORIGIN = (process.env.ADMIN_ORIGIN || 'http://localhost:8081').replace(/\/$/, '');
 // Renewals are throttled to 15 minutes, so include that margin to ensure
@@ -129,7 +131,7 @@ function readImage(request) {
   });
 }
 
-function createSceneAdmin(directory) {
+function createSceneAdmin(directory, suppliedSecurityEvents = null) {
   const images = new ImageLibrary(directory);
   const destinations = new DestinationRegistry(directory);
   function firewallProvisioningReceipt() {
@@ -152,6 +154,7 @@ function createSceneAdmin(directory) {
   }
   const firewallRegistration = getFirewallRegistration(directory);
   const accessRequests = new PortalStore(directory);
+  const securityEvents = suppliedSecurityEvents || new SecurityEvents(directory, new GeoIpLookup());
   const directoryApi = createDestinationDirectory();
   const backgrounds = () => ({ ...BACKGROUNDS, ...images.catalog() });
   const activeDestinations = () => ['torrentharbor', ...destinations.list().filter((item) => item.status === 'active').map((item) => item.id)];
@@ -251,6 +254,16 @@ function createSceneAdmin(directory) {
         },
       });
     }
+    if (url.pathname === '/api/security/summary' && request.method === 'GET') {
+      return json(response, 200, securityEvents.summary());
+    }
+    if (url.pathname === '/api/security/events' && request.method === 'GET') {
+      const keys = [...url.searchParams.keys()];
+      if (keys.some((key) => !['limit', 'severity', 'type', 'since'].includes(key)) || new Set(keys).size !== keys.length) {
+        return json(response, 400, { error: 'Invalid security-event query' });
+      }
+      return json(response, 200, { events: securityEvents.list(Object.fromEntries(url.searchParams)) });
+    }
     const destinationSnapshot = /^\/api\/destinations\/(torrentharbor|firewall)\/snapshot$/.exec(url.pathname);
     if (destinationSnapshot && request.method === 'GET') {
       if (!activeDestinations().includes(destinationSnapshot[1])) return json(response, 404, { error: 'Destination unavailable' });
@@ -276,7 +289,11 @@ function createSceneAdmin(directory) {
           const imported = await directoryApi.snapshot(id);
           if (imported.users.filter((user) => user.active && user.email.toLowerCase() === entry.email).length !== 1) throw new Error('Add this user to the destination group before approving');
         }
-        return json(response, 200, accessRequests.adminRequest(requestId, id, action));
+        const result = accessRequests.adminRequest(requestId, id, action);
+        securityEvents.record('admin_action', { request, pathname: url.pathname,
+          ip: sourceIp(request), identity: administrator.username, destination: id,
+          outcome: 'success', reason: `access_request_${action}`, status: 200 });
+        return json(response, 200, result);
       } catch (error) { return json(response, 409, { error: ['Add this user to the destination group before approving', 'TorrentHarbor approval requires its application account workflow'].includes(error.message) ? error.message : 'Request changed; refresh the destination' }); }
     }
     const addMember = /^\/api\/destinations\/(torrentharbor|firewall)\/members$/.exec(url.pathname);

@@ -29,5 +29,8 @@ else
 fi
 curl -fsS "http://127.0.0.1:$smoke_editor_port/" | grep -q '<title>Scene management</title>'
 curl -fsS "http://127.0.0.1:$smoke_editor_port/healthz" >/dev/null
+test "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$smoke_port/wp-login.php")" = 404
+curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/summary" | grep -q '"retentionDays":'
+curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/events?limit=20" | grep -q 'automated_scanner_probe'
 
-echo "local frontend, backend, artwork, and editor smoke tests passed"
+echo "local frontend, backend, artwork, editor, and security monitoring smoke tests passed"

@@ -1,0 +1,14 @@
+services:
+  backend:
+    environment:
+      GEOIP_CITY_DB_PATH: /run/geoip/GeoLite2-City.mmdb
+      GEOIP_ASN_DB_PATH: /run/geoip/GeoLite2-ASN.mmdb
+    volumes:
+      - type: bind
+        source: ${SAG_GEOIP_DIR:?Set SAG_GEOIP_DIR to the protected GeoLite directory}/GeoLite2-City.mmdb
+        target: /run/geoip/GeoLite2-City.mmdb
+        read_only: true
+      - type: bind
+        source: ${SAG_GEOIP_DIR:?Set SAG_GEOIP_DIR to the protected GeoLite directory}/GeoLite2-ASN.mmdb
+        target: /run/geoip/GeoLite2-ASN.mmdb
+        read_only: true

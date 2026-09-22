@@ -1,6 +1,6 @@
 'use strict';
 
-const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','browserTitle','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
+const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','browserTitle','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','securityPanel','securitySummary','securitySeverity','securityRefresh','securityStatus','securityEvents','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
 let state;
 let scene;
 let selectedIndex = 0;
@@ -886,6 +886,72 @@ async function showDestination() {
   }
 }
 elements.managedDestination.addEventListener('change', showDestination);
+
+function securityMetric(value, label) {
+  const item = document.createElement('div');
+  item.className = 'security-metric';
+  const count = document.createElement('strong');
+  count.textContent = String(value);
+  const caption = document.createElement('span');
+  caption.textContent = label;
+  item.append(count, caption);
+  return item;
+}
+
+function securityLocation(source) {
+  if (!source) return 'source unavailable';
+  const place = [source.city, source.region, source.country].filter(Boolean).join(', ');
+  const network = [source.asn ? 'AS' + source.asn : null, source.organization].filter(Boolean).join(' ');
+  return [source.ip || 'unknown', place || source.scope, network].filter(Boolean).join(' · ');
+}
+
+async function loadSecurity() {
+  elements.securityStatus.textContent = 'Loading recent events…';
+  elements.securityRefresh.disabled = true;
+  try {
+    const severity = elements.securitySeverity.value;
+    const [summaryResponse, eventsResponse] = await Promise.all([
+      fetch('/api/security/summary', { cache: 'no-store' }),
+      fetch('/api/security/events?limit=100' + (severity ? '&severity=' + encodeURIComponent(severity) : ''), { cache: 'no-store' }),
+    ]);
+    if (!summaryResponse.ok || !eventsResponse.ok) throw new Error('Security monitoring is unavailable');
+    const summary = await summaryResponse.json();
+    const result = await eventsResponse.json();
+    elements.securitySummary.replaceChildren(
+      securityMetric(summary.total, 'events · 24 hours'),
+      securityMetric(summary.uniquePublicIps, 'public source IPs'),
+      securityMetric(summary.successfulQr, 'successful QR sessions'),
+      securityMetric(summary.failedLogin, 'failed login attempts'),
+      securityMetric(summary.warnings, 'warnings'),
+      securityMetric(summary.critical, 'critical signals'),
+      securityMetric(summary.integrityFailures, 'integrity failures'),
+    );
+    elements.securityEvents.replaceChildren(...result.events.map((event) => {
+      const row = document.createElement('div');
+      row.className = 'security-event ' + (event.integrityValid === false ? 'critical' : event.severity);
+      const heading = document.createElement('strong');
+      heading.textContent = event.type.replaceAll('_', ' ') + ' · '
+        + (event.integrityValid === false ? 'integrity check failed' : event.severity);
+      const detail = document.createElement('div');
+      detail.textContent = new Date(event.at).toLocaleString() + ' · ' + securityLocation(event.source)
+        + (event.outcome ? ' · ' + event.outcome : '') + (event.category ? ' · ' + event.category : '')
+        + (event.http?.path ? ' · ' + event.http.method + ' ' + event.http.path : '');
+      row.append(heading, detail);
+      return row;
+    }));
+    const geo = summary.geoip;
+    elements.securityStatus.textContent = 'Retention: ' + summary.retentionDays + ' days · local GeoIP city '
+      + (geo.city.loaded ? 'loaded' : 'not configured') + ' · ASN ' + (geo.asn.loaded ? 'loaded' : 'not configured')
+      + ' · ledger ' + formatBytes(summary.storage.bytes) + ' / ' + formatBytes(summary.storage.maximumBytes)
+      + (summary.storage.limited ? ' · storage limit reached' : '')
+      + (summary.storage.suppressedSinceStart ? ' · ' + summary.storage.suppressedSinceStart + ' events suppressed' : '')
+      + ' · locations are approximate';
+  } catch (error) { elements.securityStatus.textContent = error.message; }
+  finally { elements.securityRefresh.disabled = false; }
+}
+elements.securityRefresh.addEventListener('click', loadSecurity);
+elements.securitySeverity.addEventListener('change', loadSecurity);
+elements.securityPanel.addEventListener('toggle', () => { if (elements.securityPanel.open) loadSecurity(); });
 
 async function load(preserveScene = false) {
   state = await fetch('/api/state').then((response) => response.json());

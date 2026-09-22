@@ -21,3 +21,15 @@ host, sender, username, and protected password file are populated.
 
 Never store TLS private keys, SMTP passwords, Authentik tokens, signing keys,
 database exports, or active portal state in tracked configuration.
+
+## Security events and GeoIP
+
+Application security events are retained for 30 days by default. Set
+`SAG_SECURITY_EVENT_RETENTION_DAYS` to a value from 1 through 365.
+`SAG_SECURITY_EVENT_MAX_BYTES` defaults to 67108864 (64 MiB). To enrich source
+IPs without sending them to a third party, place current licensed
+GeoLite2 City and ASN databases in the protected `SAG_GEOIP_DIR` and add
+`compose.geoip.yaml` to the Compose command.
+
+See [security monitoring](../security-monitoring.md) for the trusted-proxy
+requirement, privacy limits, and public-exposure checklist.
