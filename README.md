@@ -26,6 +26,41 @@ The project also serves as a practical reference for decomposing a mature,
 working application into reproducible containers while preserving its
 security boundaries and behavior.
 
+## Product tour
+
+### Author scenes and hidden interactions
+
+Scene Management is a browser-based authoring workspace, not a collection of
+hard-coded image maps. An administrator can choose and optimize artwork,
+define TV and phone framing, place destination hotspots, require an ordered
+multi-click sequence, preview the QR position, save drafts, publish, and
+restore earlier revisions.
+
+![Scene Management configuring a four-point ordered QR activation](docs/media/scene-management-sequence.png)
+
+The numbered rings are editor-only controls. Public visitors see the artwork,
+not the location of its access triggers.
+
+### Turn exploration into a short-lived QR handoff
+
+![Local demonstration of an ordered four-click sequence revealing a short-lived QR challenge](docs/media/qr-sequence-activation.gif)
+
+This clip uses a disposable local Compose stack. Its QR pointed only to
+`localhost`, expired with the demo, and cannot authorize any deployed service.
+The visible pointer and step label are documentation overlays; the QR reveal
+and challenge are the real application flow.
+
+### Review access and security signals in the same workspace
+
+![Scene Management security monitoring with sanitized RFC-reserved source IP events](docs/media/scene-management-security.png)
+
+The protected console correlates portal visits, QR activity, email-delivery
+outcomes, access requests, session creation, unknown routes, rate limiting,
+and common probe indicators. The screenshot uses the documentation-only IP
+`203.0.113.42`; it contains no production hostname, account, or visitor data.
+Optional GeoLite2 enrichment runs locally so visitor IPs are not sent to a
+lookup service. See [security monitoring](docs/security-monitoring.md).
+
 ## Highlights
 
 - **Interactive portal:** zoomable and pannable scenes, motion layers,
@@ -40,6 +75,9 @@ security boundaries and behavior.
 - **Identity integration:** narrowly scoped Authentik lookups and management
   operations, email verification, destination membership, and signed portal
   assertions.
+- **Security visibility:** a protected, retention-bounded event console for QR
+  outcomes, access requests, source IPs, offline GeoIP/ASN context, rate limits,
+  and non-blocking scanner/injection probe indicators.
 - **Container isolation:** an Nginx gateway is the only public entrypoint; the
   Node.js backend and identity services remain on private Compose networks.
 - **Reproducible delivery:** digest-pinned base images, exact artwork and
@@ -56,19 +94,22 @@ security boundaries and behavior.
 
 ```mermaid
 flowchart LR
-    Visitor[Visitor browser] --> Gateway[Nginx frontend / gateway]
-    Editor[Authenticated editor] --> Gateway
-    Gateway --> Backend[Node.js portal backend]
-    Backend --> State[(Portal state volume)]
-    Backend --> Mail[SMTP provider]
-    Backend --> Authentik[Authentik API]
-    Authentik --> Postgres[(PostgreSQL)]
+    Visitor[Visitor browsers] -->|HTTPS 443| Gateway[Nginx public gateway]
+    Editor[Authenticated scene manager] --> Gateway
+    Gateway -->|private Compose network| Backend[Node.js portal backend]
+    Gateway -->|only after session check| Services[Approved internal services]
+    Backend --> State[(Scene, challenge, and audit state)]
+    Backend --> Security[(Bounded security-event ledger)]
+    Backend --> Mail[SMTP confirmation]
+    Backend --> Authentik[Authentik identity API]
+    Authentik --> Postgres[(Private PostgreSQL)]
+    Security --> Editor
     Extension[Optional extensions] -. read-only mount .-> Backend
 
     classDef public fill:#dbeafe,stroke:#2563eb,color:#111827
     classDef private fill:#ecfdf5,stroke:#059669,color:#111827
     class Visitor,Editor,Gateway public
-    class Backend,State,Mail,Authentik,Postgres,Extension private
+    class Backend,State,Security,Mail,Authentik,Postgres,Services,Extension private
 ```
 
 The portable default exposes only loopback development listeners. Production
@@ -76,6 +117,42 @@ TLS, hostnames, editor authentication, and network policy belong in reviewed
 deployment configuration rather than the application image.
 
 More detail is available in the [architecture notes](docs/architecture/README.md).
+
+## How an access handoff works
+
+```mermaid
+sequenceDiagram
+    actor Display as Display browser
+    actor Phone as Visitor phone
+    participant Edge as Nginx gateway
+    participant Portal as Portal backend
+    participant IdP as Authentik
+    participant Mail as SMTP
+    participant App as Internal service
+
+    Display->>Edge: Open scene
+    Edge->>Portal: Create short-lived browser-bound challenge
+    Display->>Portal: Ordered scene interactions
+    Portal-->>Display: Reveal QR only after the trigger completes
+    Phone->>Edge: Open QR login URL
+    Phone->>Portal: Submit username or email
+    Portal->>IdP: Exact identity and destination-group lookup
+    Portal->>Mail: Send one-time confirmation link
+    Phone->>Portal: Confirm link
+    Display->>Portal: Poll challenge status
+    Portal-->>Display: Host-scoped session cookie
+    Display->>Edge: Request protected destination
+    Edge->>Portal: Internal session check
+    Portal-->>Edge: Signed, short-lived identity assertion
+    Edge->>App: Relay only the approved request
+```
+
+Known destination members receive an automated one-time email confirmation.
+Unknown visitors can submit an access request, which enters a durable
+destination-specific review queue in Scene Management. Firewall enrollment has
+an additional owner-confirmation step before group membership is granted.
+Public clients never receive internal API credentials, upstream addresses, or
+the portal signing key.
 
 ## Repository layout
 
@@ -195,6 +272,12 @@ See the [deployment guide](docs/deployment/README.md).
   production authentication design.
 - Security-sensitive deployment changes require route, denial, secret-mount,
   rollback, and recovery validation.
+- The security ledger stores normalized routes, outcomes, source IPs, and
+  keyed fingerprints; it excludes request bodies, query strings, QR/session
+  tokens, passwords, and raw email identities.
+- Probe classifications are investigation signals, not claims that an exploit
+  succeeded. Edge access logs, Authentik events, and a reviewed WAF or
+  remediation layer remain separate controls.
 
 Please read [SECURITY.md](SECURITY.md) before reporting a vulnerability or
 deploying the gateway publicly.
