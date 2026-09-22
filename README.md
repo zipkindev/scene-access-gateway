@@ -33,7 +33,7 @@ security boundaries and behavior.
 Scene Management is a browser-based authoring workspace, not a collection of
 hard-coded image maps. An administrator can choose and optimize artwork,
 define TV and phone framing, place destination hotspots, require an ordered
-multi-click sequence, preview the QR position, save drafts, publish, and
+sequence of up to ten clicks, preview the QR position, save drafts, publish, and
 restore earlier revisions.
 
 ![Scene Management configuring a four-point ordered QR activation](docs/media/scene-management-sequence.png)

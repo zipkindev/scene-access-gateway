@@ -222,7 +222,7 @@ function renderHotspot() {
     const points = [hotspot, ...sequence.steps];
     elements.sequencePointSelect.replaceChildren(...points.map((_, index) => new Option('Point ' + (index + 1), String(index))));
     elements.sequencePointSelect.value = String(selectedPointIndex);
-    elements.addSequencePoint.disabled = points.length >= 5;
+    elements.addSequencePoint.disabled = points.length >= 10;
     elements.removeSequencePoint.disabled = selectedPointIndex === 0 || points.length <= 2;
     elements.maxGapSeconds.value = sequence.maxGapSeconds;
     elements.totalSeconds.value = sequence.totalSeconds;
@@ -587,7 +587,7 @@ elements.sequencePointSelect.addEventListener('change', () => {
 });
 elements.addSequencePoint.addEventListener('click', () => {
   const sequence = selected().sequence;
-  if (!sequence || sequence.steps.length >= 4) return;
+  if (!sequence || sequence.steps.length >= 9) return;
   const last = sequence.steps.at(-1);
   sequence.steps.push({ x: Math.max(0, Math.min(1, last.x + (last.x > 0.7 ? -0.12 : 0.12))),
     y: Math.max(0, Math.min(1, last.y + (last.y > 0.7 ? -0.12 : 0.12))), radius: last.radius });
