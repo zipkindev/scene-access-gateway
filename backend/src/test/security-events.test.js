@@ -69,6 +69,7 @@ test('public Nginx logs correlation metadata and applies bounded source limits',
   assert.match(config, /proxy_set_header X-Management-Source-IP ""/);
   assert.match(config, /client_header_timeout 10s/);
   assert.match(config, /gzip on/);
+  assert.match(config, /Strict-Transport-Security "max-age=86400" always/);
   const server = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
   assert.match(server, /peerIp\(req\) !== MANAGEMENT_SOURCE_IP/);
   assert.doesNotMatch(server, /req\.headers\[['"]x-management-source-ip['"]\]/);

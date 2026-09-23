@@ -57,7 +57,8 @@ controlled probe, management-path denial, structured-log redaction, and any
 configured Telegram test delivery. Roll back both images and restore the data
 volume only if the application changed persistent data incompatibly.
 
-TLS termination must add HSTS after a short-duration trial and preserve the
+TLS termination must preserve the portable one-day HSTS starter policy and,
+after a successful short-duration trial, may lengthen it. It must preserve the
 portable configuration's normalized logs, trusted-client-IP replacement,
 probe denials, connection/body timeouts, rate limits, compression, and public
 management-path denial. Do not copy hostnames, certificates, WAF credentials,

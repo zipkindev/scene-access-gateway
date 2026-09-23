@@ -35,9 +35,10 @@ management trust headers and route trusted management calls over the private
 backend network.
 
 Keep new WAF rules in observation mode through the validation matrix, then
-enable high-confidence denials incrementally. Add HSTS at the TLS edge with a
-short initial lifetime; do not add `includeSubDomains` or `preload` until every
-covered hostname and certificate-renewal path has been reviewed.
+enable high-confidence denials incrementally. Preserve the portable one-day
+HSTS starter policy at the TLS edge; do not lengthen it or add
+`includeSubDomains` or `preload` until every covered hostname and
+certificate-renewal path has been reviewed.
 
 Telegram alerting is optional. When enabled, merge `compose.telegram.yaml`
 after reviewing the target's outbound network policy. The overlay attaches the

@@ -33,8 +33,9 @@ The portable configuration also:
 A production TLS/WAF configuration that replaces this file must preserve these
 controls. Keep a new WAF rule set in observation mode until legitimate portal,
 QR login, Scene Management, and private-service traffic have been exercised.
-HSTS belongs at that TLS edge: begin with a short `max-age`, then lengthen it
-only after certificate renewal and every covered hostname are verified.
+The portable edge emits a one-day HSTS starter policy, which browsers ignore
+over local HTTP. Preserve it at TLS termination, then lengthen it only after
+certificate renewal and every covered hostname are verified.
 
 Build and route validation run through `../scripts/build.sh` and
 `../scripts/smoke-test.sh`; the Platform root adds the optional extension

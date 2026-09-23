@@ -49,6 +49,7 @@ function send(response, status, headers, body) {
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
     'X-Permitted-Cross-Domain-Policies': 'none',
+    'Strict-Transport-Security': 'max-age=86400',
     'Permissions-Policy': 'camera=(), geolocation=(), microphone=(), payment=(), usb=()',
     'Cross-Origin-Opener-Policy': 'same-origin',
     'Cross-Origin-Resource-Policy': 'same-origin',

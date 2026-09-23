@@ -60,6 +60,7 @@ test "$(curl -sS -o /dev/null -w '%{http_code}' -X TRACE "http://127.0.0.1:$smok
 versioned_headers=$(curl -sS -D - -o /dev/null "http://127.0.0.1:$smoke_port/scene-framing.js?v=23")
 printf '%s\n' "$versioned_headers" | grep -qi '^cache-control: public, max-age=31536000, immutable'
 printf '%s\n' "$versioned_headers" | grep -qi '^permissions-policy:'
+printf '%s\n' "$versioned_headers" | grep -qi '^strict-transport-security: max-age=86400'
 compressed_headers=$(curl -sS -H 'Accept-Encoding: gzip' -D - -o /dev/null "http://127.0.0.1:$smoke_port/scene-framing.js?v=23")
 printf '%s\n' "$compressed_headers" | grep -qi '^content-encoding: gzip'
 

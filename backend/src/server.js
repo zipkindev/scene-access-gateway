@@ -147,7 +147,7 @@ function peerIp(req) {
 }
 function email(value) { const normalized = value.trim().toLowerCase(); return EMAIL.test(normalized) && normalized.length <= 254 ? normalized : null; }
 function identifier(value) { return normalizedEmail(value) || normalizedUsername(value); }
-function send(res, status, headers, body) { res.writeHead(status, { 'Cache-Control': 'no-store, max-age=0', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff', 'X-Permitted-Cross-Domain-Policies': 'none', 'Permissions-Policy': 'camera=(), geolocation=(), microphone=(), payment=(), usb=()', 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Resource-Policy': 'same-origin', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'", ...headers }); res.end(body); }
+function send(res, status, headers, body) { res.writeHead(status, { 'Cache-Control': 'no-store, max-age=0', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff', 'X-Permitted-Cross-Domain-Policies': 'none', 'Strict-Transport-Security': 'max-age=86400', 'Permissions-Policy': 'camera=(), geolocation=(), microphone=(), payment=(), usb=()', 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Resource-Policy': 'same-origin', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'", ...headers }); res.end(body); }
 function neutral(res, status = 200) { send(res, status, { 'Content-Type': 'text/html; charset=utf-8' }, submittedPage()); }
 function scriptResponse(req, res, url, body) {
   const versioned = /^[A-Za-z0-9_-]{1,64}$/.test(url.searchParams.get('v') || '');
