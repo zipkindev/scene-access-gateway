@@ -20,6 +20,7 @@ const { DestinationRegistry } = require('./scene-destinations');
 const { getFirewallRegistration } = require('./firewall-registration');
 const { ArcadeLeaderboard } = require('./arcade-leaderboard');
 const { GeoIpLookup } = require('./geoip');
+const { MaxMindSetup } = require('./maxmind-setup');
 const { SecurityEvents, sourceIp } = require('./security-events');
 const { TelegramAlerts } = require('./telegram-alerts');
 
@@ -34,7 +35,11 @@ const FIREWALL_TTL = 15 * 60 * 1000;
 const HANDOFF_TTL = 60 * 1000;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATA_DIR = process.env.DATA_DIR || '/var/lib/access-portal';
-const geoIp = new GeoIpLookup();
+const managedGeoIpDirectory = path.join(DATA_DIR, 'scene-management', 'maxmind');
+const geoIp = new GeoIpLookup(process.env.GEOIP_CITY_DB_PATH || path.join(managedGeoIpDirectory, 'GeoLite2-City.mmdb'),
+  process.env.GEOIP_ASN_DB_PATH || path.join(managedGeoIpDirectory, 'GeoLite2-ASN.mmdb'));
+const maxMindSetup = new MaxMindSetup(DATA_DIR, geoIp,
+  { managed: !process.env.GEOIP_CITY_DB_PATH && !process.env.GEOIP_ASN_DB_PATH });
 const securityEvents = new SecurityEvents(DATA_DIR, geoIp);
 const telegramAlerts = new TelegramAlerts(DATA_DIR);
 securityEvents.subscribe((event) => telegramAlerts.enqueue(event));
@@ -433,7 +438,7 @@ const server = http.createServer(async (req, res) => {
 });
 if (require.main === module) server.listen(PORT, '0.0.0.0', () => console.log(`Access portal listening on ${PORT}`));
 if (require.main === module && ADMIN_PORT) {
-  const adminServer = http.createServer(createSceneAdmin(DATA_DIR, securityEvents, telegramAlerts));
+  const adminServer = http.createServer(createSceneAdmin(DATA_DIR, securityEvents, telegramAlerts, maxMindSetup));
   adminServer.listen(ADMIN_PORT, '0.0.0.0', () => console.log(`Access scene management listening on ${ADMIN_PORT}`));
 }
 module.exports = { server };

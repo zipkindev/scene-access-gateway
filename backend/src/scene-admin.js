@@ -13,6 +13,7 @@ const { prepareFirewallDestination } = require('./destination-plan');
 const { getFirewallRegistration } = require('./firewall-registration');
 const { FIREWALL_PUBLIC } = require('./destination-plan');
 const { GeoIpLookup } = require('./geoip');
+const { MaxMindSetup } = require('./maxmind-setup');
 const { SecurityEvents, sourceIp } = require('./security-events');
 const { TelegramAlerts } = require('./telegram-alerts');
 
@@ -132,7 +133,7 @@ function readImage(request) {
   });
 }
 
-function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTelegramAlerts = null) {
+function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTelegramAlerts = null, suppliedMaxMindSetup = null) {
   const images = new ImageLibrary(directory);
   const destinations = new DestinationRegistry(directory);
   function firewallProvisioningReceipt() {
@@ -155,7 +156,11 @@ function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTele
   }
   const firewallRegistration = getFirewallRegistration(directory);
   const accessRequests = new PortalStore(directory);
-  const securityEvents = suppliedSecurityEvents || new SecurityEvents(directory, new GeoIpLookup());
+  const managedGeoIpDirectory = path.join(directory, 'scene-management', 'maxmind');
+  const geoIp = suppliedSecurityEvents?.geoip || new GeoIpLookup(path.join(managedGeoIpDirectory, 'GeoLite2-City.mmdb'),
+    path.join(managedGeoIpDirectory, 'GeoLite2-ASN.mmdb'));
+  const securityEvents = suppliedSecurityEvents || new SecurityEvents(directory, geoIp);
+  const maxMindSetup = suppliedMaxMindSetup || new MaxMindSetup(directory, geoIp);
   const telegramAlerts = suppliedTelegramAlerts || new TelegramAlerts(directory);
   const directoryApi = createDestinationDirectory();
   const backgrounds = () => ({ ...BACKGROUNDS, ...images.catalog() });
@@ -273,6 +278,59 @@ function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTele
           source: url.searchParams.getAll('source'),
         }) });
       } catch (_) { return json(response, 400, { error: 'Invalid security-event query' }); }
+    }
+    if (url.pathname === '/api/security/maxmind' && request.method === 'GET') {
+      return json(response, 200, maxMindSetup.state());
+    }
+    if (url.pathname === '/api/security/maxmind/setup' && request.method === 'POST') {
+      if (!csrf(request)) return csrfFailure(request, response);
+      try {
+        const body = await readJson(request);
+        if (Object.keys(body).sort().join(',') !== 'accountId,licenseKey') throw new Error('Invalid MaxMind credentials');
+        const result = await maxMindSetup.configure(body.accountId, body.licenseKey);
+        securityEvents.record('admin_action', { request, pathname: url.pathname,
+          ip: sourceIp(request), identity: administrator.username,
+          outcome: 'success', reason: 'maxmind_configured', status: 200 });
+        return json(response, 200, result);
+      } catch (error) {
+        const safe = ['Invalid MaxMind account ID', 'Invalid MaxMind license key',
+          'MaxMind rejected the account ID or license key', 'MaxMind download service is unavailable',
+          'MaxMind database download failed', 'MaxMind returned an invalid database archive',
+          'MaxMind database file was not found in the archive', 'MaxMind returned an invalid database',
+          'MaxMind database update is already running',
+          'GeoIP is managed by mounted server files'].includes(error.message) ? error.message : 'MaxMind setup failed';
+        return json(response, safe.startsWith('Invalid') ? 400
+          : safe.includes('mounted') || safe.includes('already running') ? 409 : 502, { error: safe });
+      }
+    }
+    if (url.pathname === '/api/security/maxmind/update' && request.method === 'POST') {
+      if (!csrf(request)) return csrfFailure(request, response);
+      try {
+        const result = await maxMindSetup.update();
+        securityEvents.record('admin_action', { request, pathname: url.pathname,
+          ip: sourceIp(request), identity: administrator.username,
+          outcome: 'success', reason: 'maxmind_databases_updated', status: 200 });
+        return json(response, 200, result);
+      } catch (error) {
+        const safe = ['Connect a MaxMind account first', 'MaxMind database update is already running'].includes(error.message)
+          ? error.message : 'MaxMind database update failed';
+        return json(response, safe.includes('first') || safe.includes('running') ? 409 : 502, { error: safe });
+      }
+    }
+    if (url.pathname === '/api/security/maxmind/setup' && request.method === 'DELETE') {
+      if (!csrf(request)) return csrfFailure(request, response);
+      try {
+        const result = maxMindSetup.disconnect();
+        securityEvents.record('admin_action', { request, pathname: url.pathname,
+          ip: sourceIp(request), identity: administrator.username,
+          outcome: 'success', reason: 'maxmind_disconnected', status: 200 });
+        return json(response, 200, result);
+      } catch (error) {
+        if (error.message === 'MaxMind database update is already running') {
+          return json(response, 409, { error: error.message });
+        }
+        return json(response, 500, { error: 'MaxMind account could not be removed' });
+      }
     }
     if (url.pathname === '/api/security/telegram' && request.method === 'GET') {
       return json(response, 200, telegramAlerts.state());

@@ -68,7 +68,9 @@ and common probe indicators. The screenshot uses the documentation-only IP
 Optional GeoLite2 enrichment runs locally so visitor IPs are not sent to a
 lookup service. Operators can combine removable severity, event-category,
 country, exact-IP, and CIDR filters; detected locations appear beside the
-source address. See [security monitoring](docs/security-monitoring.md).
+source address. MaxMind onboarding, database downloads, update status, and
+credential removal are managed from the same protected console. See
+[security monitoring](docs/security-monitoring.md).
 
 ## Highlights
 

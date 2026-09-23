@@ -37,6 +37,13 @@ backend to an egress-capable network; bot verification, chat discovery, test
 delivery, and policy are completed in Scene Management. The bot token is
 write-only and is never returned by the administration API.
 
+UI-managed MaxMind downloads are optional. Merge `compose.maxmind.yaml` or
+provide equivalent restricted HTTPS egress, then enter the account ID and
+license key in Scene Management. Credentials and databases remain in the
+protected persistent state volume. Deployments using read-only host MMDB files
+should keep `compose.geoip.yaml` instead; that mode disables UI credential
+changes.
+
 Normal Git pulls and rebases leave `.local/` untouched, so core application
 updates can be tested with the same private deployment overlay without merging
 environment values into public source.

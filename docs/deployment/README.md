@@ -17,10 +17,13 @@ reviewing the settings in `docs/configuration/README.md`.
 
 ## Optional offline GeoIP
 
-Add `compose.geoip.yaml` after installing current GeoLite2 City and ASN MMDB
-files in the protected directory configured by `SAG_GEOIP_DIR`. The backend
-performs local lookups only. Review [security monitoring](../security-monitoring.md)
-before exposing a TLS gateway publicly.
+Add `compose.maxmind.yaml` to permit database downloads, then connect the
+account from Scene Management. Credentials and validated GeoLite2 City and ASN
+files remain in the protected state volume; lookups stay local. Use
+`compose.geoip.yaml` instead when deployment policy requires read-only,
+host-managed MMDB files in `SAG_GEOIP_DIR`. Review
+[security monitoring](../security-monitoring.md) before exposing a TLS gateway
+publicly.
 
 ## Optional Telegram alerts
 

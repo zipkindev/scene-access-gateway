@@ -23,7 +23,13 @@ class GeoIpLookup {
 
   _open(file) {
     if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile()) return null;
-    return maxmind.openSync(file);
+    return new maxmind.Reader(fs.readFileSync(file));
+  }
+
+  reload() {
+    this.city = this._open(this.cityPath);
+    this.asn = this._open(this.asnPath);
+    return this.status();
   }
 
   status() {

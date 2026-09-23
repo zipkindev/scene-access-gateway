@@ -142,6 +142,10 @@ test('authenticated Scene Management exposes summary and redacted events', async
     assert.doesNotMatch(JSON.stringify(body), /private@example\.com/);
     const summary = JSON.parse((await invoke(handler, '/api/security/summary', { 'x-scene-admin': 'owner' })).body);
     assert.equal(summary.accessRequests, 1);
+    const maxmind = JSON.parse((await invoke(handler, '/api/security/maxmind', { 'x-scene-admin': 'owner' })).body);
+    assert.equal(maxmind.mode, 'scene-management');
+    assert.equal(maxmind.configured, false);
+    assert.equal(maxmind.accountHint, null);
     const filtered = await invoke(handler, '/api/security/events?severity=info&severity=warning&source=203.0.113.0%2F24', { 'x-scene-admin': 'owner' });
     assert.equal(filtered.status, 200);
     assert.equal(JSON.parse(filtered.body).events.length, 1);
