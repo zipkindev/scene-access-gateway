@@ -139,11 +139,11 @@ class WafCollector {
     return emitted;
   }
 
-  start() {
+  start(options = {}) {
     if (this.timer) return;
     this.scan();
     this.timer = setInterval(() => this.scan(), this.intervalMs);
-    this.timer.unref();
+    if (options.unref !== false) this.timer.unref();
   }
 
   stop() { if (this.timer) clearInterval(this.timer); this.timer = null; }
@@ -154,7 +154,7 @@ if (require.main === module) {
   const output = process.env.WAF_EVENT_OUTPUT || '/var/lib/waf-telemetry/events.jsonl';
   const state = process.env.WAF_COLLECTOR_STATE || '/var/lib/waf-telemetry/collector-state.json';
   const collector = new WafCollector(root, output, state);
-  collector.start();
+  collector.start({ unref: false });
   console.log(JSON.stringify({ event: 'waf_collector_started', auditRoot: root }));
   const shutdown = () => { collector.stop(); process.exit(0); };
   process.once('SIGTERM', shutdown);

@@ -6,6 +6,12 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { WafCollector, normalizeAudit } = require('../waf-collector');
+
+test('standalone collector keeps its polling timer referenced', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'waf-collector.js'), 'utf8');
+  assert.match(source, /collector\.start\(\{ unref: false \}\)/);
+  assert.match(source, /options\.unref !== false/);
+});
 const { WafIngestor } = require('../waf-ingestor');
 const { SecurityEvents } = require('../security-events');
 
