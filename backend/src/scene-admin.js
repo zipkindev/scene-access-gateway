@@ -14,6 +14,7 @@ const { getFirewallRegistration } = require('./firewall-registration');
 const { FIREWALL_PUBLIC } = require('./destination-plan');
 const { GeoIpLookup } = require('./geoip');
 const { SecurityEvents, sourceIp } = require('./security-events');
+const { TelegramAlerts } = require('./telegram-alerts');
 
 const ADMIN_ORIGIN = (process.env.ADMIN_ORIGIN || 'http://localhost:8081').replace(/\/$/, '');
 // Renewals are throttled to 15 minutes, so include that margin to ensure
@@ -131,7 +132,7 @@ function readImage(request) {
   });
 }
 
-function createSceneAdmin(directory, suppliedSecurityEvents = null) {
+function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTelegramAlerts = null) {
   const images = new ImageLibrary(directory);
   const destinations = new DestinationRegistry(directory);
   function firewallProvisioningReceipt() {
@@ -155,6 +156,7 @@ function createSceneAdmin(directory, suppliedSecurityEvents = null) {
   const firewallRegistration = getFirewallRegistration(directory);
   const accessRequests = new PortalStore(directory);
   const securityEvents = suppliedSecurityEvents || new SecurityEvents(directory, new GeoIpLookup());
+  const telegramAlerts = suppliedTelegramAlerts || new TelegramAlerts(directory);
   const directoryApi = createDestinationDirectory();
   const backgrounds = () => ({ ...BACKGROUNDS, ...images.catalog() });
   const activeDestinations = () => ['torrentharbor', ...destinations.list().filter((item) => item.status === 'active').map((item) => item.id)];
@@ -263,6 +265,33 @@ function createSceneAdmin(directory, suppliedSecurityEvents = null) {
         return json(response, 400, { error: 'Invalid security-event query' });
       }
       return json(response, 200, { events: securityEvents.list(Object.fromEntries(url.searchParams)) });
+    }
+    if (url.pathname === '/api/security/telegram' && request.method === 'GET') {
+      return json(response, 200, telegramAlerts.state());
+    }
+    if (url.pathname === '/api/security/telegram' && request.method === 'PUT') {
+      if (!csrf(request)) return csrfFailure(request, response);
+      try {
+        const result = telegramAlerts.updatePolicy(await readJson(request));
+        securityEvents.record('admin_action', { request, pathname: url.pathname,
+          ip: sourceIp(request), identity: administrator.username,
+          outcome: 'success', reason: 'telegram_policy_updated', status: 200 });
+        return json(response, 200, result);
+      } catch (_) { return json(response, 400, { error: 'Invalid Telegram alert policy' }); }
+    }
+    if (url.pathname === '/api/security/telegram/test' && request.method === 'POST') {
+      if (!csrf(request)) return csrfFailure(request, response);
+      try {
+        const result = await telegramAlerts.test();
+        securityEvents.record('admin_action', { request, pathname: url.pathname,
+          ip: sourceIp(request), identity: administrator.username,
+          outcome: 'success', reason: 'telegram_test_requested', status: 200 });
+        return json(response, 200, result);
+      } catch (error) {
+        const message = error.message === 'Telegram credentials are not configured'
+          ? error.message : error.message === 'Telegram test is rate limited' ? error.message : 'Telegram test failed';
+        return json(response, message.includes('not configured') ? 409 : 429, { error: message });
+      }
     }
     const destinationSnapshot = /^\/api\/destinations\/(torrentharbor|firewall)\/snapshot$/.exec(url.pathname);
     if (destinationSnapshot && request.method === 'GET') {

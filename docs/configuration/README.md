@@ -45,6 +45,24 @@ GeoLite2 City and ASN databases in the protected `SAG_GEOIP_DIR` and add
 See [security monitoring](../security-monitoring.md) for the trusted-proxy
 requirement, privacy limits, and public-exposure checklist.
 
+## Telegram security alerts
+
+Telegram delivery is optional and disabled without both protected files:
+
+- `SAG_TELEGRAM_BOT_TOKEN_FILE` contains the token issued by Telegram's
+  BotFather;
+- `SAG_TELEGRAM_CHAT_ID_FILE` contains the numeric destination chat ID.
+
+Do not place either value directly in `.env`. Set `.env` only to the local file
+paths, keep the files mode `0600`, and add `compose.telegram.yaml` to the
+Compose command. That overlay supplies the secret mounts and a separate
+egress-capable network. The base stack remains internal-only.
+
+After startup, Scene Management → Security monitoring → Telegram alerts shows
+only configured/active status. It controls enablement, severity, categories,
+aggregation, cooldowns, rate limits, UTC quiet hours, redaction, and labeled
+test delivery; it never exposes the token or chat ID.
+
 The Platform root automatically combines Gateway and Wolf Compose files and
 optionally includes `.local/compose.override.yaml`. Keep environment-specific
 values in these runtime inputs rather than rebuilding public images for each

@@ -21,6 +21,7 @@ const { getFirewallRegistration } = require('./firewall-registration');
 const { ArcadeLeaderboard } = require('./arcade-leaderboard');
 const { GeoIpLookup } = require('./geoip');
 const { SecurityEvents, sourceIp } = require('./security-events');
+const { TelegramAlerts } = require('./telegram-alerts');
 
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const ADMIN_PORT = process.env.ADMIN_PORT ? Number.parseInt(process.env.ADMIN_PORT, 10) : null;
@@ -35,6 +36,8 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATA_DIR = process.env.DATA_DIR || '/var/lib/access-portal';
 const geoIp = new GeoIpLookup();
 const securityEvents = new SecurityEvents(DATA_DIR, geoIp);
+const telegramAlerts = new TelegramAlerts(DATA_DIR);
+securityEvents.subscribe((event) => telegramAlerts.enqueue(event));
 const store = new PortalStore(DATA_DIR);
 const destinationRegistry = new DestinationRegistry(DATA_DIR);
 const firewallRegistration = getFirewallRegistration(DATA_DIR);
@@ -424,7 +427,7 @@ const server = http.createServer(async (req, res) => {
 });
 if (require.main === module) server.listen(PORT, '0.0.0.0', () => console.log(`Access portal listening on ${PORT}`));
 if (require.main === module && ADMIN_PORT) {
-  const adminServer = http.createServer(createSceneAdmin(DATA_DIR, securityEvents));
+  const adminServer = http.createServer(createSceneAdmin(DATA_DIR, securityEvents, telegramAlerts));
   adminServer.listen(ADMIN_PORT, '0.0.0.0', () => console.log(`Access scene management listening on ${ADMIN_PORT}`));
 }
 module.exports = { server };

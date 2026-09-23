@@ -1,6 +1,6 @@
 'use strict';
 
-const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','browserTitle','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','securityPanel','securitySummary','securitySeverity','securityRefresh','securityStatus','securityEvents','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
+const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','browserTitle','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','securityPanel','securitySummary','securitySeverity','securityRefresh','securityStatus','securityEvents','telegramConfigured','telegramEnabled','telegramSeverity','telegramRedaction','telegramThreshold','telegramWindow','telegramCooldown','telegramHourlyLimit','telegramQuietEnabled','telegramQuietStart','telegramQuietEnd','telegramCriticalOverride','telegramSave','telegramTest','telegramStatus','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
 let state;
 let scene;
 let selectedIndex = 0;
@@ -905,6 +905,80 @@ function securityLocation(source) {
   return [source.ip || 'unknown', place || source.scope, network].filter(Boolean).join(' · ');
 }
 
+const telegramCategories = [...document.querySelectorAll('[data-telegram-category]')];
+
+function showTelegram(result) {
+  const policy = result.policy;
+  elements.telegramConfigured.textContent = result.configured
+    ? (result.active ? 'Configured and active' : 'Credentials configured; delivery disabled')
+    : 'Credentials not configured on the server; delivery remains disabled';
+  elements.telegramEnabled.checked = policy.enabled;
+  elements.telegramSeverity.value = policy.minimumSeverity;
+  elements.telegramRedaction.value = policy.redaction;
+  elements.telegramThreshold.value = policy.countThreshold;
+  elements.telegramWindow.value = policy.aggregationWindowSeconds;
+  elements.telegramCooldown.value = policy.cooldownSeconds;
+  elements.telegramHourlyLimit.value = policy.globalLimitPerHour;
+  elements.telegramQuietEnabled.checked = Boolean(policy.quietHours);
+  elements.telegramQuietStart.value = policy.quietHours?.start || '22:00';
+  elements.telegramQuietEnd.value = policy.quietHours?.end || '07:00';
+  elements.telegramCriticalOverride.checked = policy.criticalOverride;
+  for (const input of telegramCategories) input.checked = policy.categories.includes(input.dataset.telegramCategory);
+  elements.telegramTest.disabled = !result.configured;
+  const delivery = result.delivery;
+  elements.telegramStatus.textContent = 'Pending: ' + result.pending
+    + (delivery.lastSuccessAt ? ' · last delivered ' + new Date(delivery.lastSuccessAt).toLocaleString() : '')
+    + (delivery.lastFailureAt ? ' · last failure ' + new Date(delivery.lastFailureAt).toLocaleString() + ' (' + delivery.lastFailureCode + ')' : '');
+}
+
+async function loadTelegram() {
+  const response = await fetch('/api/security/telegram', { cache: 'no-store' });
+  if (!response.ok) throw new Error('Telegram alert settings are unavailable');
+  showTelegram(await response.json());
+}
+
+function telegramPolicy() {
+  return {
+    version: 1,
+    enabled: elements.telegramEnabled.checked,
+    minimumSeverity: elements.telegramSeverity.value,
+    categories: telegramCategories.filter((input) => input.checked).map((input) => input.dataset.telegramCategory),
+    countThreshold: Number(elements.telegramThreshold.value),
+    aggregationWindowSeconds: Number(elements.telegramWindow.value),
+    cooldownSeconds: Number(elements.telegramCooldown.value),
+    globalLimitPerHour: Number(elements.telegramHourlyLimit.value),
+    quietHours: elements.telegramQuietEnabled.checked
+      ? { start: elements.telegramQuietStart.value, end: elements.telegramQuietEnd.value } : null,
+    criticalOverride: elements.telegramCriticalOverride.checked,
+    redaction: elements.telegramRedaction.value,
+  };
+}
+
+elements.telegramSave.addEventListener('click', async () => {
+  elements.telegramStatus.textContent = 'Saving alert policy…';
+  try {
+    const response = await fetch('/api/security/telegram', { method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Scene-CSRF': requireCsrf() },
+      body: JSON.stringify(telegramPolicy()) });
+    const result = await readWriteResponse(response);
+    if (!response.ok) throw new Error(result.error || 'Telegram policy was not saved');
+    showTelegram(result);
+  } catch (error) { elements.telegramStatus.textContent = error.message; }
+});
+
+elements.telegramTest.addEventListener('click', async () => {
+  elements.telegramTest.disabled = true;
+  elements.telegramStatus.textContent = 'Sending labeled test alert…';
+  try {
+    const response = await fetch('/api/security/telegram/test', { method: 'POST',
+      headers: { 'X-Scene-CSRF': requireCsrf() } });
+    const result = await readWriteResponse(response);
+    if (!response.ok) throw new Error(result.error || 'Telegram test failed');
+    showTelegram(result);
+  } catch (error) { elements.telegramStatus.textContent = error.message; }
+  finally { elements.telegramTest.disabled = false; }
+});
+
 async function loadSecurity() {
   elements.securityStatus.textContent = 'Loading recent events…';
   elements.securityRefresh.disabled = true;
@@ -917,6 +991,7 @@ async function loadSecurity() {
     if (!summaryResponse.ok || !eventsResponse.ok) throw new Error('Security monitoring is unavailable');
     const summary = await summaryResponse.json();
     const result = await eventsResponse.json();
+    await loadTelegram();
     elements.securitySummary.replaceChildren(
       securityMetric(summary.total, 'events · 24 hours'),
       securityMetric(summary.uniquePublicIps, 'public source IPs'),
