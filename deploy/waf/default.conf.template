@@ -37,6 +37,10 @@ server {
     ssl_prefer_server_ciphers ${SSL_PREFER_CIPHERS};
     ssl_stapling off;
 
+    # Use the Nginx request identifier as the ModSecurity transaction key so
+    # normalized WAF findings can be correlated without retaining headers.
+    modsecurity_transaction_id $request_id;
+
     PROXY_SSL_CONFIG
 
     location / {

@@ -268,13 +268,14 @@ function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTele
     }
     if (url.pathname === '/api/security/events' && request.method === 'GET') {
       const keys = [...url.searchParams.keys()];
-      if (keys.some((key) => !['limit', 'severity', 'type', 'category', 'country', 'source', 'since'].includes(key))
+      if (keys.some((key) => !['limit', 'stream', 'severity', 'type', 'category', 'country', 'source', 'since'].includes(key))
         || ['limit', 'since'].some((key) => url.searchParams.getAll(key).length > 1)) {
         return json(response, 400, { error: 'Invalid security-event query' });
       }
       try {
         const filters = {
           limit: url.searchParams.get('limit'), since: url.searchParams.get('since'),
+          stream: url.searchParams.getAll('stream'),
           severity: url.searchParams.getAll('severity'), type: url.searchParams.getAll('type'),
           category: url.searchParams.getAll('category'), country: url.searchParams.getAll('country'),
           source: url.searchParams.getAll('source'),

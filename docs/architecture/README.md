@@ -29,6 +29,9 @@ flowchart TB
     WolfRepo -. read-only runtime and controller mounts .-> Backend
     WAF -->|private network or loopback HTTPS| Frontend
     WAF --> WafAudit[(Restricted WAF audit files)]
+    WafAudit --> Collector[Networkless telemetry collector]
+    Collector --> WafFeed[(Normalized WAF findings)]
+    WafFeed --> Backend
     Frontend -->|private network| Backend
     Backend --> State[(Protected persistent state)]
     Backend --> Identity[Authentik and SMTP]
@@ -86,8 +89,15 @@ The system intentionally does not pretend that one log can see everything:
 4. Authentik records identity, failed-login, invitation, group, and
    administrative events.
 
+The WAF collector collapses correlation rules and multiple CRS messages from
+one transaction into a single normalized finding. It strips query values,
+headers, bodies, cookies, authorization values, and uploads before the backend
+re-signs the event into its integrity-protected ledger. The collector has no
+network or Telegram credentials. Scene Management owns observation and alert
+policy; WAF enforcement remains a reviewed deployment setting.
+
 Correlating these streams provides better evidence than copying raw request
 bodies into an application database. See [security monitoring](../security-monitoring.md)
-for retention, trusted-client-IP, GeoIP, and alerting guidance. WAF audit events
-are not automatically Telegram alerts; that requires a separate sanitized
-audit-to-alert adapter.
+for retention, trusted-client-IP, GeoIP, and alerting guidance. Normalized WAF
+findings can become deduplicated Telegram incidents without exposing raw audit
+content.

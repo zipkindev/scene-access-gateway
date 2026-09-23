@@ -118,8 +118,10 @@ flowchart LR
     WAF -->|private network or loopback HTTPS| Gateway[Hardened origin Nginx]
     Editor[Authenticated scene manager] -->|private editor route| Gateway
     Gateway -->|private Compose network| Backend[Node.js portal backend]
-    Gateway -->|only after session check| Services[Approved internal services]
     WAF --> WafAudit[(Restricted WAF audit)]
+    WafAudit --> WafCollector[Networkless telemetry collector]
+    WafCollector --> Backend
+    Gateway -->|only after session check| Services[Approved internal services]
     Backend --> State[(Scene, challenge, and audit state)]
     Backend --> Security[(Bounded security-event ledger)]
     Backend --> Mail[SMTP confirmation]

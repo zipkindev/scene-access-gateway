@@ -1,6 +1,6 @@
 'use strict';
 
-const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','browserTitle','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','securityPanel','securitySummary','securitySeverity','securityRefresh','securityStatus','securityEvents','telegramToken','telegramVerifyBot','telegramBotLink','telegramBotStatus','telegramChat','telegramChatId','telegramDiscoverChats','telegramConnectChat','telegramDisconnect','telegramConfigured','telegramEnabled','telegramSeverity','telegramRedaction','telegramThreshold','telegramWindow','telegramCooldown','telegramHourlyLimit','telegramQuietEnabled','telegramQuietStart','telegramQuietEnd','telegramCriticalOverride','telegramSave','telegramTest','telegramStatus','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
+const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','browserTitle','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','securityPanel','securitySummary','securitySeverity','securityRefresh','securityStatus','securityEvents','telegramToken','telegramVerifyBot','telegramBotLink','telegramBotStatus','telegramChat','telegramChatId','telegramDiscoverChats','telegramConnectChat','telegramDisconnect','telegramConfigured','telegramEnabled','telegramSeverity','telegramRedaction','telegramThreshold','telegramWindow','telegramCooldown','telegramReminder','telegramQuietAfter','telegramHourlyLimit','telegramQuietEnabled','telegramQuietStart','telegramQuietEnd','telegramCriticalOverride','telegramSave','telegramTest','telegramStatus','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
 let state;
 let scene;
 let selectedIndex = 0;
@@ -899,10 +899,10 @@ function securityMetric(value, label) {
 }
 
 const countryNames = typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(['en'], { type: 'region' }) : null;
-const securityFilters = Object.fromEntries(['severity', 'type', 'category', 'country', 'source']
+const securityFilters = Object.fromEntries(['stream', 'severity', 'type', 'category', 'country', 'source']
   .map((kind) => [kind, new Map()]));
 const securityLabels = {
-  severity: 'Severity', type: 'Event', category: 'Alert', country: 'Country', source: 'Source',
+  stream: 'Stream', severity: 'Severity', type: 'Event', category: 'Alert', country: 'Country', source: 'Source',
 };
 
 function countryName(code) {
@@ -936,6 +936,18 @@ const securityToolbar = elements.securitySeverity.closest('.security-toolbar');
 const severityField = elements.securitySeverity.closest('.field');
 const securityQuickFilters = document.createElement('div');
 securityQuickFilters.className = 'security-quick-filters';
+securityQuickFilters.append(Object.assign(document.createElement('span'), { textContent: 'Stream:' }));
+const streamButtons = new Map();
+for (const [value, label] of [['application', 'Application'], ['waf', 'WAF']]) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'security-filter-option';
+  button.textContent = label;
+  button.setAttribute('aria-pressed', 'false');
+  button.addEventListener('click', () => toggleSecurityFilter('stream', value, label));
+  streamButtons.set(value, button);
+  securityQuickFilters.append(button);
+}
 securityQuickFilters.append(Object.assign(document.createElement('span'), { textContent: 'Severity:' }));
 const severityButtons = new Map();
 for (const value of ['critical', 'warning', 'info']) {
@@ -990,6 +1002,9 @@ securityFilterChips.className = 'security-filter-chips';
 securityToolbar.after(securityFilterChips);
 
 function renderSecurityFilters() {
+  for (const [value, button] of streamButtons) {
+    button.setAttribute('aria-pressed', String(securityFilters.stream.has(value)));
+  }
   for (const [value, button] of severityButtons) {
     button.setAttribute('aria-pressed', String(securityFilters.severity.has(value)));
   }
@@ -1211,7 +1226,46 @@ maxMindDisconnect.addEventListener('click', async () => {
   finally { if (maxMindState) showMaxMind(maxMindState); else maxMindDisconnect.disabled = false; }
 });
 
+function telegramNumberField(labelText, id, minimum, maximum) {
+  const input = document.createElement('input');
+  input.id = id;
+  input.type = 'number';
+  input.min = String(minimum);
+  input.max = String(maximum);
+  input.step = '1';
+  const label = document.createElement('label');
+  label.className = 'field';
+  label.append(labelText, input);
+  return { label, input };
+}
+const telegramPolicyGrid = elements.telegramCooldown.closest('.telegram-grid');
+elements.telegramCooldown.closest('.field').firstChild.textContent = 'Initial dedupe window (seconds)';
+const reminderField = telegramNumberField('Persistent reminder (seconds)', 'telegramReminder', 60, 86400);
+const quietAfterField = telegramNumberField('Close incident after quiet (seconds)', 'telegramQuietAfter', 60, 604800);
+telegramPolicyGrid.insertBefore(reminderField.label, elements.telegramHourlyLimit.closest('.field'));
+telegramPolicyGrid.insertBefore(quietAfterField.label, elements.telegramHourlyLimit.closest('.field'));
+elements.telegramReminder = reminderField.input;
+elements.telegramQuietAfter = quietAfterField.input;
+
+const telegramCategoryGrid = document.querySelector('.telegram-categories');
+for (const [category, labelText] of [
+  ['sensitive_file_enumeration', 'Sensitive-file enumeration'],
+  ['backup_file_probe', 'Backup-file probes'],
+  ['framework_admin_probe', 'Framework administration probes'],
+  ['known_scanner', 'Known scanner signatures'],
+  ['protocol_anomaly', 'Protocol anomalies'],
+]) {
+  const label = document.createElement('label');
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.dataset.telegramCategory = category;
+  label.append(input, ' ' + labelText);
+  telegramCategoryGrid.append(label);
+}
 const telegramCategories = [...document.querySelectorAll('[data-telegram-category]')];
+const telegramIncidentList = document.createElement('div');
+telegramIncidentList.className = 'security-events';
+elements.telegramStatus.before(telegramIncidentList);
 
 function showTelegram(result) {
   const policy = result.policy;
@@ -1239,6 +1293,8 @@ function showTelegram(result) {
   elements.telegramThreshold.value = policy.countThreshold;
   elements.telegramWindow.value = policy.aggregationWindowSeconds;
   elements.telegramCooldown.value = policy.cooldownSeconds;
+  elements.telegramReminder.value = policy.persistentReminderSeconds;
+  elements.telegramQuietAfter.value = policy.incidentQuietSeconds;
   elements.telegramHourlyLimit.value = policy.globalLimitPerHour;
   elements.telegramQuietEnabled.checked = Boolean(policy.quietHours);
   elements.telegramQuietStart.value = policy.quietHours?.start || '22:00';
@@ -1248,8 +1304,29 @@ function showTelegram(result) {
   elements.telegramTest.disabled = !result.configured;
   const delivery = result.delivery;
   elements.telegramStatus.textContent = 'Pending: ' + result.pending
+    + ' · active incidents: ' + (result.incidents?.active || 0)
+    + (result.incidents?.suppressedByHourlyLimit ? ' · hourly-limit suppressions: ' + result.incidents.suppressedByHourlyLimit : '')
     + (delivery.lastSuccessAt ? ' · last delivered ' + new Date(delivery.lastSuccessAt).toLocaleString() : '')
     + (delivery.lastFailureAt ? ' · last failure ' + new Date(delivery.lastFailureAt).toLocaleString() + ' (' + delivery.lastFailureCode + ')' : '');
+  const incidents = (result.incidents?.items || []).map((incident) => {
+    const row = document.createElement('div');
+    row.className = 'security-event';
+    const heading = document.createElement('strong');
+    heading.textContent = readableSecurityValue(incident.category) + ' · ' + incident.count + ' observed';
+    const detail = document.createElement('div');
+    detail.textContent = incident.source + ' · target ' + incident.target + ' · last seen '
+      + new Date(incident.lastSeenAt).toLocaleString() + ' · '
+      + Object.entries(incident.dispositions).map(([name, count]) => readableSecurityValue(name) + ' ' + count).join(' · ');
+    row.append(heading, detail);
+    return row;
+  });
+  if (!incidents.length) {
+    const empty = document.createElement('p');
+    empty.className = 'security-note';
+    empty.textContent = 'No active alert incidents.';
+    incidents.push(empty);
+  }
+  telegramIncidentList.replaceChildren(...incidents);
 }
 
 async function loadTelegram() {
@@ -1260,13 +1337,15 @@ async function loadTelegram() {
 
 function telegramPolicy() {
   return {
-    version: 1,
+    version: 2,
     enabled: elements.telegramEnabled.checked,
     minimumSeverity: elements.telegramSeverity.value,
     categories: telegramCategories.filter((input) => input.checked).map((input) => input.dataset.telegramCategory),
     countThreshold: Number(elements.telegramThreshold.value),
     aggregationWindowSeconds: Number(elements.telegramWindow.value),
     cooldownSeconds: Number(elements.telegramCooldown.value),
+    persistentReminderSeconds: Number(elements.telegramReminder.value),
+    incidentQuietSeconds: Number(elements.telegramQuietAfter.value),
     globalLimitPerHour: Number(elements.telegramHourlyLimit.value),
     quietHours: elements.telegramQuietEnabled.checked
       ? { start: elements.telegramQuietStart.value, end: elements.telegramQuietEnd.value } : null,
@@ -1407,6 +1486,11 @@ async function loadSecurity() {
       securityMetric(summary.warnings, 'warnings'),
       securityMetric(summary.critical, 'critical signals'),
       securityMetric(summary.integrityFailures, 'integrity failures'),
+      securityMetric(summary.waf?.total || 0, 'WAF findings'),
+      securityMetric(summary.waf?.passed || 0, 'WAF observed and passed'),
+      securityMetric(summary.waf?.rejected || 0, 'origin or edge rejected'),
+      securityMetric(summary.waf?.rateLimited || 0, 'origin rate limited'),
+      securityMetric(summary.waf?.blocked || 0, 'WAF blocked'),
     );
     const rows = result.events.map((event) => {
       const row = document.createElement('div');
@@ -1425,6 +1509,11 @@ async function loadSecurity() {
       if (event.category) detail.append(' · ' + readableSecurityValue(event.category));
       if (event.http?.path) detail.append(' · ' + event.http.method + ' ' + event.http.path
         + (event.http.status !== null ? ' → ' + event.http.status : ''));
+      if (event.edge) detail.append(' · target ' + (event.edge.target || 'unknown')
+        + ' · ' + readableSecurityValue(event.edge.disposition)
+        + (event.edge.ruleIds?.length ? ' · CRS ' + event.edge.ruleIds.join(', ') : '')
+        + (event.edge.anomalyScore !== null ? ' · score ' + event.edge.anomalyScore : '')
+        + (event.edge.historical ? ' · historical import' : ''));
       if (event.requestId) detail.append(' · request ' + event.requestId);
       row.append(heading, detail);
       return row;
@@ -1443,6 +1532,11 @@ async function loadSecurity() {
       + ' · ledger ' + formatBytes(summary.storage.bytes) + ' / ' + formatBytes(summary.storage.maximumBytes)
       + (summary.storage.limited ? ' · storage limit reached' : '')
       + (summary.storage.suppressedSinceStart ? ' · ' + summary.storage.suppressedSinceStart + ' events suppressed' : '')
+      + ' · WAF ' + (summary.waf?.ingestion?.configured
+        ? (summary.waf.ingestion.mode || 'mode unknown') + ', telemetry '
+          + (summary.waf.ingestion.inputAvailable ? 'connected' : 'waiting for input')
+        : 'telemetry not configured')
+      + (summary.waf?.ingestion?.lastError ? ' (' + summary.waf.ingestion.lastError + ')' : '')
       + ' · locations are approximate';
   } catch (error) { elements.securityStatus.textContent = error.message; }
   finally { elements.securityRefresh.disabled = false; }

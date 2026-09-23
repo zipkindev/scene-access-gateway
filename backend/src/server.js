@@ -23,6 +23,7 @@ const { GeoIpLookup } = require('./geoip');
 const { MaxMindSetup } = require('./maxmind-setup');
 const { SecurityEvents, sourceIp } = require('./security-events');
 const { TelegramAlerts } = require('./telegram-alerts');
+const { WafIngestor } = require('./waf-ingestor');
 
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const ADMIN_PORT = process.env.ADMIN_PORT ? Number.parseInt(process.env.ADMIN_PORT, 10) : null;
@@ -45,6 +46,10 @@ const maxMindSetup = new MaxMindSetup(DATA_DIR, geoIp,
 const securityEvents = new SecurityEvents(DATA_DIR, geoIp, { asyncWrites: true });
 const telegramAlerts = new TelegramAlerts(DATA_DIR);
 securityEvents.subscribe((event) => telegramAlerts.enqueue(event));
+const wafIngestor = new WafIngestor(process.env.WAF_EVENT_INPUT_PATH || null, securityEvents, DATA_DIR,
+  { mode: process.env.WAF_MODE });
+securityEvents.wafStatus = () => wafIngestor.status();
+wafIngestor.start();
 const store = new PortalStore(DATA_DIR);
 const destinationRegistry = new DestinationRegistry(DATA_DIR);
 const firewallRegistration = getFirewallRegistration(DATA_DIR);
@@ -522,6 +527,7 @@ if (require.main === module) {
     });
     try {
       await Promise.all([close(server), close(adminServer)]);
+      wafIngestor.stop();
       await securityEvents.flush();
       process.exit(0);
     } catch (_) { process.exit(1); }

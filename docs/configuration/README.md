@@ -60,6 +60,14 @@ timeouts, compression, and rate limits. Keep new WAF policies in observation
 mode during representative validation. Configure HSTS at TLS termination with
 a short initial lifetime before considering broader coverage.
 
+For WAF monitoring, provide a protected `SAG_WAF_TELEMETRY_DIR` to the
+networkless collector, mount that directory read-only into the backend, and
+set `WAF_EVENT_INPUT_PATH=/run/waf-telemetry/events.jsonl`. The normalized feed
+is size-bounded and excludes headers, bodies, query values, credentials, and
+uploads. Scene Management displays the configured WAF mode as read-only
+deployment state; it controls monitoring and notification policy, not CRS
+enforcement.
+
 ## Telegram security alerts
 
 Add `compose.telegram.yaml` to attach the backend to a separate egress-capable

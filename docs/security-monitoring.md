@@ -214,6 +214,14 @@ categories, set an aggregation threshold and window, configure per-source
 cooldowns and a global hourly ceiling, choose UTC quiet hours with an optional
 critical override, select a redaction level, and send a labeled test alert.
 
+When WAF telemetry is configured, Scene Management also displays normalized
+CRS findings and whether each request passed, was rejected or rate limited by
+the origin, or was blocked at the edge. Telegram incidents are keyed by source
+fingerprint, target, and attack category. The first qualifying event alerts
+immediately, duplicates accumulate, and ongoing activity re-alerts at the
+configured persistence interval even when the origin continues returning
+`429`. A quiet interval closes the active incident.
+
 The event ledger remains authoritative. A notification is queued only after
 its security event has been durably appended. Delivery uses a bounded persisted
 queue, short HTTPS timeouts, bounded retries, cooldowns, and rate limits. A
@@ -222,6 +230,12 @@ recording. Delivery state—never the stored bot token—is visible in the UI. A
 `compose.telegram.yaml` to attach the backend to the optional egress network.
 Production should restrict outbound traffic to Telegram's HTTPS API using the
 deployment environment's reviewed network controls.
+
+The WAF collector itself has no outbound network and never holds Telegram
+credentials. It excludes request and response headers, query values, bodies,
+cookies, authorization data, and uploads. Reaching the hourly notification
+ceiling never removes ledger events; a later summary reports notification
+suppression.
 
 Scene Management accepts a token through a write-only password field over the
 protected administration listener. The backend verifies it with Telegram

@@ -8,16 +8,20 @@ const LEVELS = ['info', 'warning', 'critical'];
 const CATEGORIES = new Set([
   'sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
   'automated_scanner_probe', 'unexpected_http_method', 'invalid_content_length',
-  'rate_limiting', 'integrity_failure',
+  'sensitive_file_enumeration', 'backup_file_probe', 'framework_admin_probe',
+  'known_scanner', 'protocol_anomaly', 'rate_limiting', 'integrity_failure',
 ]);
 const DEFAULT_POLICY = Object.freeze({
-  version: 1,
+  version: 2,
   enabled: false,
   minimumSeverity: 'critical',
-  categories: ['sql_injection_probe', 'command_injection_probe', 'path_traversal_probe', 'integrity_failure'],
+  categories: ['sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
+    'sensitive_file_enumeration', 'backup_file_probe', 'known_scanner', 'integrity_failure'],
   countThreshold: 1,
   aggregationWindowSeconds: 60,
   cooldownSeconds: 300,
+  persistentReminderSeconds: 900,
+  incidentQuietSeconds: 1800,
   globalLimitPerHour: 20,
   quietHours: null,
   criticalOverride: true,
@@ -67,7 +71,16 @@ function validatePolicy(value) {
   if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error('Invalid Telegram policy');
   const allowed = new Set(Object.keys(DEFAULT_POLICY));
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('Invalid Telegram policy');
-  const policy = { ...DEFAULT_POLICY, ...value, version: 1 };
+  const categories = Array.isArray(value.categories) ? [...value.categories] : value.categories;
+  if (value.version === 1 && Array.isArray(categories)) {
+    if (categories.includes('automated_scanner_probe')) categories.push(
+      'sensitive_file_enumeration', 'backup_file_probe', 'framework_admin_probe', 'known_scanner');
+    if (categories.includes('unexpected_http_method') || categories.includes('invalid_content_length')) {
+      categories.push('protocol_anomaly');
+    }
+  }
+  const policy = { ...DEFAULT_POLICY, ...value, categories, version: 2 };
+  if (Array.isArray(policy.categories)) policy.categories = [...new Set(policy.categories)];
   if (typeof policy.enabled !== 'boolean' || !LEVELS.includes(policy.minimumSeverity)
     || !Array.isArray(policy.categories) || policy.categories.length > CATEGORIES.size
     || policy.categories.some((item) => !CATEGORIES.has(item))
@@ -75,6 +88,8 @@ function validatePolicy(value) {
     || !Number.isInteger(policy.countThreshold) || policy.countThreshold < 1 || policy.countThreshold > 100
     || !Number.isInteger(policy.aggregationWindowSeconds) || policy.aggregationWindowSeconds < 10 || policy.aggregationWindowSeconds > 3600
     || !Number.isInteger(policy.cooldownSeconds) || policy.cooldownSeconds < 0 || policy.cooldownSeconds > 86400
+    || !Number.isInteger(policy.persistentReminderSeconds) || policy.persistentReminderSeconds < 60 || policy.persistentReminderSeconds > 86400
+    || !Number.isInteger(policy.incidentQuietSeconds) || policy.incidentQuietSeconds < 60 || policy.incidentQuietSeconds > 604800
     || !Number.isInteger(policy.globalLimitPerHour) || policy.globalLimitPerHour < 1 || policy.globalLimitPerHour > 100
     || typeof policy.criticalOverride !== 'boolean' || !['masked', 'country-only'].includes(policy.redaction)) {
     throw new Error('Invalid Telegram policy');
@@ -128,6 +143,8 @@ class TelegramAlerts {
     this.cooldowns = new Map(Object.entries(this.delivery.cooldowns || {}).filter(([, until]) => Number.isFinite(until)));
     this.sent = Array.isArray(this.delivery.recentDeliveries)
       ? this.delivery.recentDeliveries.filter((at) => Number.isFinite(at) && this.now().getTime() - at < 3600000) : [];
+    this.incidents = new Map(Object.entries(this.delivery.activeIncidents || {})
+      .filter(([, value]) => value && Number.isFinite(value.lastSeenAt)));
     this.draining = null;
     if (this.queue.length && this.policy.enabled && this.configured()) this._schedule();
   }
@@ -151,6 +168,7 @@ class TelegramAlerts {
   }
 
   state() {
+    const activeIncidents = this._activeIncidents();
     return {
       configured: this.configured(), active: this.configured() && this.policy.enabled,
       setup: {
@@ -162,6 +180,14 @@ class TelegramAlerts {
           type: this.integration.chat.type } : null,
       },
       policy: structuredClone(this.policy), pending: this.queue.length,
+      incidents: { active: activeIncidents.length,
+        suppressedByHourlyLimit: Number(this.delivery.suppressedByHourlyLimit || 0),
+        items: activeIncidents.sort((left, right) => right.lastSeenAt - left.lastSeenAt).slice(0, 50)
+          .map((incident) => ({ category: incident.category, target: incident.target,
+            source: incident.source, firstSeenAt: new Date(incident.startedAt).toISOString(),
+            lastSeenAt: new Date(incident.lastSeenAt).toISOString(), count: incident.count,
+            sinceAlert: incident.sinceAlert, dispositions: { ...incident.dispositions } })),
+      },
       delivery: { lastSuccessAt: this.delivery.lastSuccessAt || null,
         lastFailureAt: this.delivery.lastFailureAt || null,
         lastFailureCode: this.delivery.lastFailureCode || null,
@@ -197,6 +223,7 @@ class TelegramAlerts {
     atomicJson(this.metadataFile, this.integration);
     if (this.policy.enabled) this.updatePolicy({ ...this.policy, enabled: false });
     this.queue = [];
+    this.incidents.clear();
     this._saveQueue();
     return this.state();
   }
@@ -242,6 +269,7 @@ class TelegramAlerts {
     this.integration = { bot: null, chat: null };
     if (this.policy.enabled) this.updatePolicy({ ...this.policy, enabled: false });
     this.queue = [];
+    this.incidents.clear();
     this._saveQueue();
     return this.state();
   }
@@ -254,6 +282,7 @@ class TelegramAlerts {
   }
 
   enqueue(event) {
+    if (event.edge?.historical) return false;
     const credentials = this._credentials();
     const category = eventCategory(event);
     if (!credentials || !this.policy.enabled || !category || !this.policy.categories.includes(category)) return false;
@@ -261,32 +290,70 @@ class TelegramAlerts {
     const now = this.now();
     if (quiet(this.policy, now) && !(event.severity === 'critical' && this.policy.criticalOverride)) return false;
     const fingerprint = crypto.createHash('sha256').update(String(event.source?.ip || 'unknown')).digest('hex').slice(0, 12);
-    const key = `${category}:${fingerprint}`;
-    const current = this.aggregates.get(key);
-    const windowMs = this.policy.aggregationWindowSeconds * 1000;
-    const aggregate = current && now.getTime() - current.startedAt < windowMs
-      ? current : { startedAt: now.getTime(), count: 0, event };
-    aggregate.count += 1;
-    aggregate.event = event;
-    this.aggregates.set(key, aggregate);
-    if (aggregate.count < this.policy.countThreshold) return false;
-    if ((this.cooldowns.get(key) || 0) > now.getTime()) return false;
+    const target = String(event.edge?.target || event.destination || 'portal').slice(0, 253);
+    const key = `${category}:${fingerprint}:${target}`;
+    const prior = this.incidents.get(key);
+    const expired = !prior || now.getTime() - prior.lastSeenAt >= this.policy.incidentQuietSeconds * 1000;
+    const incident = expired ? { startedAt: now.getTime(), lastSeenAt: now.getTime(), windowStartedAt: now.getTime(),
+      thresholdCount: 0, count: 0,
+      sinceAlert: 0, lastAlertAt: 0, highestSeverity: 'info', target, category,
+      source: maskedSource(event.source, this.policy.redaction), dispositions: {} } : prior;
+    if (!Number.isFinite(incident.windowStartedAt)
+      || now.getTime() - incident.windowStartedAt >= this.policy.aggregationWindowSeconds * 1000) {
+      incident.windowStartedAt = now.getTime();
+      incident.thresholdCount = 0;
+    }
+    incident.thresholdCount = Number(incident.thresholdCount || 0) + 1;
+    const escalated = LEVELS.indexOf(event.severity) > LEVELS.indexOf(incident.highestSeverity);
+    incident.count += 1;
+    incident.sinceAlert += 1;
+    incident.lastSeenAt = now.getTime();
+    if (LEVELS.indexOf(event.severity) > LEVELS.indexOf(incident.highestSeverity)) incident.highestSeverity = event.severity;
+    const disposition = String(event.edge?.disposition || event.outcome || 'observed').slice(0, 80);
+    incident.dispositions[disposition] = (incident.dispositions[disposition] || 0) + 1;
+    this.incidents.set(key, incident);
+    this._saveStatus();
+    if (!incident.lastAlertAt && incident.thresholdCount < this.policy.countThreshold) return false;
+    const repeatMs = Math.max(this.policy.cooldownSeconds, this.policy.persistentReminderSeconds) * 1000;
+    if (incident.lastAlertAt && !escalated && now.getTime() - incident.lastAlertAt < repeatMs) return false;
     this.sent = this.sent.filter((at) => now.getTime() - at < 3600000);
-    if (this.sent.length >= this.policy.globalLimitPerHour) return false;
-    this.aggregates.delete(key);
-    this.cooldowns.set(key, now.getTime() + this.policy.cooldownSeconds * 1000);
+    let pendingDeliveries = this.queue.filter((item) => !item.test).length;
+    if (this.delivery.suppressedByHourlyLimit && this.sent.length + pendingDeliveries < this.policy.globalLimitPerHour) {
+      this.queue.push({ id: crypto.randomUUID(), text: [
+        'Scene Access security alert summary',
+        `${this.delivery.suppressedByHourlyLimit} incident notification(s) were suppressed by the hourly ceiling.`,
+        'All underlying security events remain available in Scene Management.',
+        `Time: ${now.toISOString()}`,
+      ].join('\n'), createdAt: now.toISOString(), test: false });
+      this.delivery.suppressedByHourlyLimit = 0;
+      pendingDeliveries += 1;
+      this._saveQueue();
+      this._schedule();
+    }
+    if (this.sent.length + pendingDeliveries >= this.policy.globalLimitPerHour) {
+      this.delivery.suppressedByHourlyLimit = Number(this.delivery.suppressedByHourlyLimit || 0) + 1;
+      incident.lastAlertAt = now.getTime();
+      this._saveStatus();
+      return false;
+    }
     const source = maskedSource(event.source, this.policy.redaction);
+    const dispositionSummary = Object.entries(incident.dispositions)
+      .map(([name, count]) => `${name.replaceAll('_', ' ')} ${count}`).join(' · ');
     const text = [
       'Scene Access security alert',
       `${String(event.severity || 'warning').toUpperCase()} · ${category.replaceAll('_', ' ')}`,
-      `Observed: ${aggregate.count}`,
+      `Observed since last alert: ${incident.sinceAlert} · total: ${incident.count}`,
       `Time: ${event.at || now.toISOString()}`,
       `Source: ${source}`,
+      `Target: ${target}`,
+      dispositionSummary ? `Results: ${dispositionSummary}` : null,
       event.outcome ? `Outcome: ${String(event.outcome).slice(0, 80)}` : null,
     ].filter(Boolean).join('\n').slice(0, 3500);
     this.queue.push({ id: crypto.randomUUID(), text, createdAt: now.toISOString(), test: false });
     if (this.queue.length > 100) this.queue.splice(0, this.queue.length - 100);
     this._saveQueue();
+    incident.lastAlertAt = now.getTime();
+    incident.sinceAlert = 0;
     this._saveStatus();
     this._schedule();
     return true;
@@ -306,11 +373,18 @@ class TelegramAlerts {
   }
 
   _saveQueue() { atomicJson(this.queueFile, this.queue); }
+  _activeIncidents() {
+    const cutoff = this.now().getTime() - this.policy.incidentQuietSeconds * 1000;
+    for (const [key, incident] of this.incidents) if (incident.lastSeenAt < cutoff) this.incidents.delete(key);
+    return [...this.incidents.values()];
+  }
   _saveStatus() {
     const now = this.now().getTime();
     this.sent = this.sent.filter((at) => now - at < 3600000);
     for (const [key, until] of this.cooldowns) if (until <= now) this.cooldowns.delete(key);
+    this._activeIncidents();
     atomicJson(this.statusFile, { ...this.delivery, recentDeliveries: this.sent,
+      activeIncidents: Object.fromEntries(this.incidents),
       cooldowns: Object.fromEntries(this.cooldowns) });
   }
 

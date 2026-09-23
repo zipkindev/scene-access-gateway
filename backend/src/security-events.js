@@ -9,18 +9,21 @@ const LEVELS = new Set(['info', 'warning', 'critical']);
 const TYPES = new Set([
   'portal_visit', 'qr_login_page_opened', 'qr_login_attempt', 'qr_email_delivery',
   'qr_verified', 'portal_session_created', 'access_request', 'rate_limited',
-  'request_rejected', 'suspicious_request', 'admin_action',
+  'request_rejected', 'suspicious_request', 'waf_finding', 'admin_action',
 ]);
 const CATEGORIES = new Set([
   'sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
   'automated_scanner_probe', 'unexpected_http_method', 'invalid_content_length',
-  'rate_limiting', 'integrity_failure',
+  'sensitive_file_enumeration', 'backup_file_probe', 'framework_admin_probe',
+  'known_scanner', 'protocol_anomaly', 'rate_limiting', 'integrity_failure',
 ]);
 const TOKEN = /\b[A-Za-z0-9_-]{43}\b/g;
 const SQL = /(?:\bunion\s+(?:all\s+)?select\b|\binformation_schema\b|\b(?:sleep|benchmark)\s*\(|\bwaitfor\s+delay\b|(?:'|%27)\s*(?:or|and)\s+['"%\d])/i;
 const TRAVERSAL = /(?:\.\.\/|\.\.\\|%2e%2e(?:%2f|%5c)|\/etc\/passwd|\/proc\/self)/i;
 const COMMAND = /(?:\$\(|`[^`]{0,120}`|(?:;|%3b|\||%7c)\s*(?:cat|curl|wget|sh|bash|nc|python|perl)\b)/i;
-const SCANNER = /(?:^|\/)(?:\.env|\.git|wp-admin|wp-login\.php|phpmyadmin|server-status|actuator|vendor\/phpunit)(?:\/|$)/i;
+const SENSITIVE = /(?:^|\/)(?:\.env(?:[._~-][^/]*)?|\.git(?:-credentials|-askpass\.sh|-secret|config|ignore|modules)?|\.ssh|\.aws|\.kube\/config|\.docker\/(?:config|secrets)\.json|\.config\/(?:gcloud|anthropic)|\.terraform\/terraform\.tfstate|wp-config\.php|settings\.ini|\.boto|\.esmtprc|\.msmtprc|\.amplifyrc|\.claude\/settings\.json)(?:\/|$)/i;
+const BACKUP = /(?:^|\/)[^/]{1,180}(?:\.bak|\.backup|\.old|\.orig|\.save|\.swp|~)(?:\/|$)/i;
+const FRAMEWORK = /(?:^|\/)(?:wp-admin|wp-login\.php|phpmyadmin|server-status|actuator|vendor\/phpunit|_profiler\/phpinfo(?:\.php)?)(?:\/|$)/i;
 const REQUEST_ID = /^[0-9a-f-]{36}$/;
 
 function safeDecode(value) {
@@ -42,7 +45,9 @@ function classifyRequest(request, url) {
   if (SQL.test(sample)) findings.push({ category: 'sql_injection_probe', severity: 'critical' });
   if (TRAVERSAL.test(sample)) findings.push({ category: 'path_traversal_probe', severity: 'critical' });
   if (COMMAND.test(sample)) findings.push({ category: 'command_injection_probe', severity: 'critical' });
-  if (SCANNER.test(url.pathname)) findings.push({ category: 'automated_scanner_probe', severity: 'warning' });
+  if (SENSITIVE.test(url.pathname)) findings.push({ category: 'sensitive_file_enumeration', severity: 'critical' });
+  else if (BACKUP.test(url.pathname)) findings.push({ category: 'backup_file_probe', severity: 'warning' });
+  else if (FRAMEWORK.test(url.pathname)) findings.push({ category: 'framework_admin_probe', severity: 'warning' });
   if (!['GET', 'HEAD', 'POST'].includes(request.method || '')) findings.push({ category: 'unexpected_http_method', severity: 'warning' });
   if (String(request.headers['content-length'] || '').length > 12) findings.push({ category: 'invalid_content_length', severity: 'warning' });
   return findings;
@@ -167,7 +172,7 @@ class SecurityEvents {
     return new Promise((resolve) => this.flushWaiters.push(resolve));
   }
 
-  _admit(ip, severity, now = Date.now()) {
+  _admit(ip, severity, now = Date.now(), sourceMaximum = null) {
     const window = Math.floor(now / 60000);
     for (const [key, value] of this.buckets) if (value.window < window) this.buckets.delete(key);
     const update = (key, maximum) => {
@@ -178,15 +183,22 @@ class SecurityEvents {
       this.buckets.set(key, value);
       return true;
     };
-    return update('global', 3000) && update(`${ip}\0${severity}`, severity === 'info' ? 60 : 120);
+    return update('global', 3000) && update(`${ip}\0${severity}`,
+      sourceMaximum || (severity === 'info' ? 60 : 120));
   }
 
   record(type, data = {}) {
     if (!TYPES.has(type)) throw new Error('Invalid security event type');
     const severity = LEVELS.has(data.severity) ? data.severity : 'info';
     const ip = typeof data.ip === 'string' && net.isIP(data.ip) ? data.ip : 'unknown';
-    if (!this._admit(ip, severity)) { this.suppressed += 1; return null; }
-    const at = new Date().toISOString();
+    if (!this._admit(ip, severity, Date.now(), type === 'waf_finding' ? 1000 : null)) {
+      this.suppressed += 1;
+      return null;
+    }
+    const suppliedAt = type === 'waf_finding' && Number.isFinite(Date.parse(data.at || '')) ? Date.parse(data.at) : NaN;
+    const at = Number.isFinite(suppliedAt) && suppliedAt <= Date.now() + 5 * 60 * 1000
+      ? new Date(suppliedAt).toISOString() : new Date().toISOString();
+    const suppliedHttp = type === 'waf_finding' && data.http && typeof data.http === 'object' ? data.http : null;
     const event = {
       version: 1, id: crypto.randomUUID(), at, type, severity,
       outcome: typeof data.outcome === 'string' ? data.outcome.slice(0, 80) : null,
@@ -198,10 +210,27 @@ class SecurityEvents {
         path: safePath(data.pathname || data.request.url),
         status: Number.isInteger(data.status) ? data.status : null,
         agentHash: this._hash(String(data.request.headers['user-agent'] || '').slice(0, 512)),
+      } : suppliedHttp ? {
+        method: String(suppliedHttp.method || '').slice(0, 12),
+        path: safePath(String(suppliedHttp.path || '/').split('?')[0]),
+        status: Number.isInteger(suppliedHttp.status) ? suppliedHttp.status : null,
+        agentHash: null,
       } : null,
       identityHash: data.identity ? this._hash(String(data.identity).trim().toLowerCase()) : null,
       requestId: REQUEST_ID.test(data.requestId || '') ? data.requestId : null,
       category: typeof data.category === 'string' ? data.category.slice(0, 80) : null,
+      edge: data.edge && typeof data.edge === 'object' ? {
+        target: /^[A-Za-z0-9.-]{1,253}$/.test(data.edge.target || '') ? data.edge.target.toLowerCase() : null,
+        disposition: ['observed_passed', 'origin_rejected', 'origin_rate_limited', 'waf_blocked',
+          'edge_rejected', 'outcome_unknown'].includes(data.edge.disposition) ? data.edge.disposition : 'outcome_unknown',
+        ruleIds: Array.isArray(data.edge.ruleIds) ? [...new Set(data.edge.ruleIds.filter((value) => /^\d{1,10}$/.test(String(value))).map(String))].slice(0, 32) : [],
+        anomalyScore: Number.isInteger(data.edge.anomalyScore) && data.edge.anomalyScore >= 0 && data.edge.anomalyScore <= 1000
+          ? data.edge.anomalyScore : null,
+        interrupted: data.edge.interrupted === true,
+        transactionId: /^[A-Za-z0-9_-]{1,128}$/.test(data.edge.transactionId || '')
+          ? data.edge.transactionId : null,
+        historical: data.edge.historical === true,
+      } : null,
     };
     const canonical = JSON.stringify(event);
     event.integrity = this._hash(canonical);
@@ -242,6 +271,7 @@ class SecurityEvents {
   list(options = {}) {
     const limit = Math.min(250, Math.max(1, Number.parseInt(options.limit || '100', 10) || 100));
     const severities = selected(options.severity, LEVELS, 'severity');
+    const streams = selected(options.stream, new Set(['application', 'waf']), 'stream');
     const types = selected(options.type, TYPES, 'event type');
     const categories = selected(options.category, CATEGORIES, 'category');
     const countries = selected(options.country, new Set((Array.isArray(options.country) ? options.country
@@ -269,7 +299,9 @@ class SecurityEvents {
         }
         const category = effectiveCategory(event);
         const sourceVersion = net.isIP(event.source?.ip);
+        const stream = event.type === 'waf_finding' ? 'waf' : 'application';
         if ((severities.size && !severities.has(event.severity))
+          || (streams.size && !streams.has(stream))
           || (types.size && !types.has(event.type))
           || (categories.size && !categories.has(category))
           || (countries.size && !countries.has(event.source?.country))
@@ -304,6 +336,14 @@ class SecurityEvents {
       successfulQr: count((event) => event.type === 'portal_session_created' && event.outcome === 'success'),
       failedLogin: count((event) => event.type === 'qr_login_attempt' && event.outcome !== 'accepted'),
       accessRequests: count((event) => event.type === 'access_request'),
+      waf: {
+        total: count((event) => event.type === 'waf_finding'),
+        passed: count((event) => event.edge?.disposition === 'observed_passed'),
+        rejected: count((event) => ['origin_rejected', 'edge_rejected'].includes(event.edge?.disposition)),
+        rateLimited: count((event) => event.edge?.disposition === 'origin_rate_limited'),
+        blocked: count((event) => event.edge?.disposition === 'waf_blocked'),
+        ingestion: typeof this.wafStatus === 'function' ? this.wafStatus() : { configured: false },
+      },
       uniquePublicIps: new Set(events.filter((event) => event.source?.scope === 'public').map((event) => event.source.ip)).size,
       countries: [...countries].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         .slice(0, 8).map(([country, value]) => ({ country, count: value })),

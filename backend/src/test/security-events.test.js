@@ -38,6 +38,10 @@ test('request classification reports categories without retaining the payload', 
   assert.deepEqual(classifyRequest(request, url), [{ category: 'sql_injection_probe', severity: 'critical' }]);
   assert.equal(safePath('/login/' + 'a'.repeat(43)), '/login/:token');
   assert.equal(sourceIp({ headers: { 'x-portal-source-ip': 'not-an-ip' } }), 'unknown');
+  assert.deepEqual(classifyRequest({ method: 'GET', headers: {} }, new URL('https://portal.example/.ssh/authorized_keys')),
+    [{ category: 'sensitive_file_enumeration', severity: 'critical' }]);
+  assert.deepEqual(classifyRequest({ method: 'GET', headers: {} }, new URL('https://portal.example/_profiler/phpinfo')),
+    [{ category: 'framework_admin_probe', severity: 'warning' }]);
 });
 
 test('probe events retain response status and a request correlation ID', () => temporary((directory) => {

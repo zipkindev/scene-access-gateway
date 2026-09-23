@@ -18,6 +18,10 @@ services:
       TORRENTHARBOR_TLS_NAME: ${SAG_TORRENTHARBOR_TLS_NAME:?Set the application TLS name}
       MANAGEMENT_SOURCE_IP: ${SAG_MANAGEMENT_SOURCE_IP:?Set the trusted management source}
       PORTAL_OWNER_USERNAME: ${SAG_PORTAL_OWNER_USERNAME:?Set the portal owner username}
+      WAF_EVENT_INPUT_PATH: /run/waf-telemetry/events.jsonl
+      WAF_MODE: ${SAG_WAF_MODE:-DetectionOnly}
+    volumes:
+      - ${SAG_WAF_TELEMETRY_DIR:?Set the protected normalized WAF telemetry directory}:/run/waf-telemetry:ro
     secrets:
       - smtp-env
       - authentik-api-token

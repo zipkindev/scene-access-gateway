@@ -44,16 +44,18 @@ The reusable WAF image, Nginx templates, and shared-network-namespace Compose
 pattern are tracked in [`deploy/waf/`](../waf/README.md). In that pattern the
 WAF owns the published TLS listener and forwards only to a loopback listener in
 the separate hardened origin Nginx container. TrueNAS overrides must supply the
-hostname allowlist, one allowed health-check host, TLS mount, protected audit
-directory, origin configuration, published port, and certificate-reloader
-settings. Keep those target values ignored. Do not expose the loopback origin
+hostname allowlist, one allowed health-check host, TLS mount, protected raw
+audit and normalized telemetry directories, origin configuration, published
+port, and certificate-reloader settings. Keep those target values ignored. Do
+not expose the loopback origin
 listener or make the backend directly reachable.
 
 The baseline WAF policy is OWASP CRS 4.29.0 on ModSecurity 3.0.16 in
 `DetectionOnly`. Audit parts `AHZ` exclude request headers, cookies,
-authorization values, request/response bodies, and uploads. WAF audit records
-remain separate from the application's Telegram pipeline until a reviewed,
-sanitized adapter is added.
+authorization values, request/response bodies, and uploads. The tracked
+networkless telemetry sidecar normalizes those audits for Scene Management and
+Telegram without exposing raw audit content. Mount its normalized feed
+read-only into the portal backend; keep raw audits available only to operators.
 
 Telegram alerting is optional. When enabled, merge `compose.telegram.yaml`
 after reviewing the target's outbound network policy. The overlay attaches the
