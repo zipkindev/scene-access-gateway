@@ -101,21 +101,16 @@ The event ledger remains authoritative. A notification is queued only after
 its security event has been durably appended. Delivery uses a bounded persisted
 queue, short HTTPS timeouts, bounded retries, cooldowns, and rate limits. A
 Telegram outage cannot block the portal, QR flow, Scene Management, or event
-recording. Delivery state—never credentials—is visible in the UI.
-
-Credentials are not configuration fields. Supply two protected files:
-
-```text
-SAG_TELEGRAM_BOT_TOKEN_FILE=./.local/secrets/telegram-bot-token
-SAG_TELEGRAM_CHAT_ID_FILE=./.local/secrets/telegram-chat-id
-```
-
-The first contains the BotFather token and the second contains only the numeric
-destination chat ID. Keep both out of Git, logs, screenshots, environment
-values, image layers, and browser storage. Add `compose.telegram.yaml` to mount
-them at `/run/secrets/` and attach the backend to the optional egress network.
+recording. Delivery state—never the stored bot token—is visible in the UI. Add
+`compose.telegram.yaml` to attach the backend to the optional egress network.
 Production should restrict outbound traffic to Telegram's HTTPS API using the
 deployment environment's reviewed network controls.
+
+Scene Management accepts a token through a write-only password field over the
+protected administration listener. The backend verifies it with Telegram
+before storing it as a mode-`0600` file in the persistent data volume. It does
+not return the token in API responses. Chat discovery uses Telegram updates so
+an administrator does not need to find or copy a numeric chat ID manually.
 
 Messages contain the time, category, severity, occurrence count, outcome, and
 either a masked source with approximate local GeoIP/ASN context or country-only
@@ -124,21 +119,19 @@ usernames, cookies, challenge/session tokens, credentials, and full source IPs.
 
 To obtain the required values:
 
-1. Create a bot through Telegram's verified `@BotFather` account and store the
-   issued token directly in the protected token file.
-2. Add the bot to the intended private chat or channel. Grant only permission
-   to post messages; it does not need administrative access for a direct chat.
-3. Send one message to the bot or channel, then determine the numeric chat ID
-   using Telegram's Bot API `getUpdates` response or an independently reviewed
-   chat-ID tool. Store only that numeric ID in the protected chat file.
-4. Start with delivery disabled, open Scene Management, confirm the UI reports
-   credentials configured, save the desired policy, send one labeled test, and
-   enable delivery only after the expected destination receives it.
+1. Create a bot through Telegram's verified `@BotFather` account.
+2. In Scene Management, paste the token and select **Verify and save bot**.
+3. Open the verified bot link. For a private chat, press **Start** and send a
+   message. For a group or channel, add the bot with only the permissions it
+   needs and post a message.
+4. Select **Discover chats**, choose the intended destination, and connect it.
+5. Send a labeled test alert. Enable delivery only after the expected
+   destination receives it.
 
-Treat a leaked bot token as compromised: revoke it through BotFather, replace
-the protected file, restart only the backend service, and send another labeled
-test. Never paste a real token or chat ID into an issue, commit, or support
-message.
+Treat a leaked bot token as compromised: revoke it through BotFather, verify
+the replacement in Scene Management, reconnect the destination, and send
+another labeled test. Never paste a real token into an issue, commit, log, or
+support message.
 
 ## Authentik and edge monitoring
 

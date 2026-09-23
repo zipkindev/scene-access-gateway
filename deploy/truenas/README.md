@@ -23,10 +23,10 @@ networks, volumes, health checks, certificate paths, backups, rollback, and
 active-session gates.
 
 Telegram alerting is optional. When enabled, merge `compose.telegram.yaml`
-and provide the two protected files named by `SAG_TELEGRAM_BOT_TOKEN_FILE` and
-`SAG_TELEGRAM_CHAT_ID_FILE`. Review the target's outbound network policy before
-attaching the backend to an egress-capable network. Scene Management controls
-the alert policy but never accepts or returns either secret.
+after reviewing the target's outbound network policy. The overlay attaches the
+backend to an egress-capable network; bot verification, chat discovery, test
+delivery, and policy are completed in Scene Management. The bot token is
+write-only and is never returned by the administration API.
 
 Normal Git pulls and rebases leave `.local/` untouched, so core application
 updates can be tested with the same private deployment overlay without merging

@@ -113,6 +113,46 @@ test('missing credentials expose configuration state but disable delivery', asyn
   await assert.rejects(() => alerts.test(), /not configured/);
 }));
 
+test('Scene Management can verify a bot, discover a chat, and persist write-only credentials', async () => temporary(async (directory) => {
+  const token = '123456:' + 'b'.repeat(35);
+  const requests = [];
+  const alerts = new TelegramAlerts(directory, { retryDelays: [0], fetch: async (url, options) => {
+    requests.push({ url, body: JSON.parse(options.body) });
+    const method = url.split('/').at(-1);
+    const values = {
+      getMe: { id: 123456, is_bot: true, first_name: 'Scene Access', username: 'SceneAccessAlertsBot' },
+      getUpdates: [{ update_id: 1, message: { chat: { id: 987654321, type: 'private', first_name: 'Operator' } } }],
+      getChat: { id: 987654321, type: 'private', first_name: 'Operator' },
+      sendMessage: { message_id: 1 },
+    };
+    return { ok: true, status: 200, async json() { return { ok: true, result: values[method] }; } };
+  } });
+  const tokenState = await alerts.configureToken(token);
+  assert.equal(tokenState.configured, false);
+  assert.equal(tokenState.setup.bot.username, 'SceneAccessAlertsBot');
+  assert.equal(JSON.stringify(tokenState).includes(token), false);
+  assert.equal(fs.statSync(path.join(directory, 'scene-management', 'telegram-bot-token')).mode & 0o777, 0o600);
+  const discovered = await alerts.discoverChats();
+  assert.deepEqual(discovered.chats, [{ id: '987654321', title: 'Operator', type: 'private' }]);
+  const connected = await alerts.configureChat(discovered.chats[0].id);
+  assert.equal(connected.configured, true);
+  assert.deepEqual(connected.setup.chat, { title: 'Operator', type: 'private' });
+  assert.equal(JSON.stringify(connected).includes('987654321'), false);
+  const restarted = new TelegramAlerts(directory, { retryDelays: [0], fetch: alerts.fetch });
+  assert.equal(restarted.state().configured, true);
+  assert.deepEqual(restarted.state().setup.chat, { title: 'Operator', type: 'private' });
+  await restarted.test();
+  assert.equal(requests.at(-1).body.chat_id, '987654321');
+  restarted.updatePolicy({ ...DEFAULT_POLICY, enabled: true });
+  const replaced = await restarted.configureToken(token);
+  assert.equal(replaced.configured, false);
+  assert.equal(replaced.policy.enabled, false);
+  assert.equal(fs.existsSync(path.join(directory, 'scene-management', 'telegram-chat-id')), false);
+  const disconnected = restarted.disconnect();
+  assert.equal(disconnected.configured, false);
+  assert.equal(disconnected.setup.bot, null);
+}));
+
 async function invokeJson(handler, method, url, body, headers = {}) {
   const request = Readable.from(body === undefined ? [] : [JSON.stringify(body)]);
   request.method = method;
@@ -135,6 +175,10 @@ test('Scene Management exposes policy controls without exposing credentials', as
       delivery: { lastSuccessAt: null, lastFailureAt: null, lastFailureCode: null, lastTestAt: null } }),
     updatePolicy(value) { policy = validatePolicy(value); return this.state(); },
     async test() { tests += 1; return this.state(); },
+    async configureToken() { return this.state(); },
+    async discoverChats() { return { chats: [{ id: '123', title: 'Operator', type: 'private' }] }; },
+    async configureChat() { return this.state(); },
+    disconnect() { return this.state(); },
   };
   const handler = createSceneAdmin(directory, security, telegram);
   const headers = { 'x-scene-admin': 'owner', origin: 'http://localhost:8081',
@@ -149,5 +193,14 @@ test('Scene Management exposes policy controls without exposing credentials', as
   const sent = await invokeJson(handler, 'POST', '/api/security/telegram/test', undefined, headers);
   assert.equal(sent.status, 200);
   assert.equal(tests, 1);
-  assert.equal(security.list({ type: 'admin_action' }).length, 2);
+  const verified = await invokeJson(handler, 'POST', '/api/security/telegram/setup/token', { token: '123456:' + 'x'.repeat(35) }, headers);
+  assert.equal(verified.status, 200);
+  const chats = await invokeJson(handler, 'POST', '/api/security/telegram/setup/chats', undefined, headers);
+  assert.equal(chats.status, 200);
+  assert.equal(chats.body.chats[0].title, 'Operator');
+  const connected = await invokeJson(handler, 'POST', '/api/security/telegram/setup/chat', { chatId: '123' }, headers);
+  assert.equal(connected.status, 200);
+  const disconnected = await invokeJson(handler, 'DELETE', '/api/security/telegram/setup', undefined, headers);
+  assert.equal(disconnected.status, 200);
+  assert.equal(security.list({ type: 'admin_action' }).length, 5);
 }));

@@ -1,6 +1,6 @@
 'use strict';
 
-const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','browserTitle','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','securityPanel','securitySummary','securitySeverity','securityRefresh','securityStatus','securityEvents','telegramConfigured','telegramEnabled','telegramSeverity','telegramRedaction','telegramThreshold','telegramWindow','telegramCooldown','telegramHourlyLimit','telegramQuietEnabled','telegramQuietStart','telegramQuietEnd','telegramCriticalOverride','telegramSave','telegramTest','telegramStatus','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
+const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','browserTitle','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','securityPanel','securitySummary','securitySeverity','securityRefresh','securityStatus','securityEvents','telegramToken','telegramVerifyBot','telegramBotLink','telegramBotStatus','telegramChat','telegramChatId','telegramDiscoverChats','telegramConnectChat','telegramDisconnect','telegramConfigured','telegramEnabled','telegramSeverity','telegramRedaction','telegramThreshold','telegramWindow','telegramCooldown','telegramHourlyLimit','telegramQuietEnabled','telegramQuietStart','telegramQuietEnd','telegramCriticalOverride','telegramSave','telegramTest','telegramStatus','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
 let state;
 let scene;
 let selectedIndex = 0;
@@ -909,9 +909,24 @@ const telegramCategories = [...document.querySelectorAll('[data-telegram-categor
 
 function showTelegram(result) {
   const policy = result.policy;
+  const setup = result.setup || { mode: 'not-configured', bot: null, chat: null };
   elements.telegramConfigured.textContent = result.configured
-    ? (result.active ? 'Configured and active' : 'Credentials configured; delivery disabled')
-    : 'Credentials not configured on the server; delivery remains disabled';
+    ? ((setup.chat?.title ? setup.chat.title + ' · ' : '')
+      + (result.active ? 'configured and active' : 'configured; delivery disabled'))
+    : setup.bot ? 'Bot verified; connect a destination to finish setup'
+      : 'Bot not configured; delivery remains disabled';
+  elements.telegramBotStatus.textContent = setup.bot
+    ? 'Verified @' + setup.bot.username + (setup.bot.name ? ' · ' + setup.bot.name : '')
+    : setup.mode === 'mounted-files' ? 'Bot credentials are managed by mounted server files.' : 'No bot verified.';
+  if (setup.bot?.username) {
+    elements.telegramBotLink.href = 'https://t.me/' + setup.bot.username;
+    elements.telegramBotLink.hidden = false;
+  } else {
+    elements.telegramBotLink.removeAttribute('href');
+    elements.telegramBotLink.hidden = true;
+  }
+  elements.telegramDisconnect.disabled = setup.mode !== 'scene-management';
+  elements.telegramEnabled.disabled = !result.configured;
   elements.telegramEnabled.checked = policy.enabled;
   elements.telegramSeverity.value = policy.minimumSeverity;
   elements.telegramRedaction.value = policy.redaction;
@@ -953,6 +968,81 @@ function telegramPolicy() {
     redaction: elements.telegramRedaction.value,
   };
 }
+
+async function telegramSetupRequest(path, method, body) {
+  const response = await fetch(path, { method,
+    headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      'X-Scene-CSRF': requireCsrf() },
+    body: body === undefined ? undefined : JSON.stringify(body) });
+  const result = await readWriteResponse(response);
+  if (!response.ok) throw new Error(result.error || 'Telegram setup failed');
+  return result;
+}
+
+elements.telegramVerifyBot.addEventListener('click', async () => {
+  const token = elements.telegramToken.value.trim();
+  if (!token) return elements.telegramBotStatus.textContent = 'Enter the token issued by BotFather.';
+  elements.telegramVerifyBot.disabled = true;
+  elements.telegramBotStatus.textContent = 'Verifying bot with Telegram…';
+  try {
+    const result = await telegramSetupRequest('/api/security/telegram/setup/token', 'POST', { token });
+    elements.telegramToken.value = '';
+    showTelegram(result);
+    elements.telegramStatus.textContent = 'Bot verified. Open it, press Start, send a message, then discover chats.';
+  } catch (error) { elements.telegramBotStatus.textContent = error.message; }
+  finally {
+    elements.telegramToken.value = '';
+    elements.telegramVerifyBot.disabled = false;
+  }
+});
+
+elements.telegramDiscoverChats.addEventListener('click', async () => {
+  elements.telegramDiscoverChats.disabled = true;
+  elements.telegramStatus.textContent = 'Discovering chats that contacted this bot…';
+  try {
+    const result = await telegramSetupRequest('/api/security/telegram/setup/chats', 'POST');
+    elements.telegramChat.replaceChildren();
+    for (const chat of result.chats) {
+      const option = document.createElement('option');
+      option.value = chat.id;
+      option.textContent = chat.title + ' · ' + chat.type;
+      elements.telegramChat.append(option);
+    }
+    if (!result.chats.length) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'No chats found — send the bot a message and retry';
+      elements.telegramChat.append(option);
+    }
+    elements.telegramStatus.textContent = result.chats.length
+      ? 'Select the destination and connect it.' : 'No chats found. Open the bot, press Start, send a message, and retry.';
+  } catch (error) { elements.telegramStatus.textContent = error.message; }
+  finally { elements.telegramDiscoverChats.disabled = false; }
+});
+
+elements.telegramConnectChat.addEventListener('click', async () => {
+  const chatId = elements.telegramChat.value || elements.telegramChatId.value.trim();
+  if (!chatId) return elements.telegramStatus.textContent = 'Discover or enter a Telegram destination first.';
+  elements.telegramConnectChat.disabled = true;
+  elements.telegramStatus.textContent = 'Verifying destination…';
+  try {
+    const result = await telegramSetupRequest('/api/security/telegram/setup/chat', 'POST', { chatId });
+    elements.telegramChatId.value = '';
+    showTelegram(result);
+    elements.telegramStatus.textContent = 'Destination connected. Send a test alert before enabling delivery.';
+  } catch (error) { elements.telegramStatus.textContent = error.message; }
+  finally { elements.telegramConnectChat.disabled = false; }
+});
+
+elements.telegramDisconnect.addEventListener('click', async () => {
+  if (!window.confirm('Disconnect this Telegram bot and disable alert delivery?')) return;
+  elements.telegramDisconnect.disabled = true;
+  try {
+    const result = await telegramSetupRequest('/api/security/telegram/setup', 'DELETE');
+    showTelegram(result);
+    elements.telegramStatus.textContent = 'Telegram bot disconnected.';
+  } catch (error) { elements.telegramStatus.textContent = error.message; }
+});
 
 elements.telegramSave.addEventListener('click', async () => {
   elements.telegramStatus.textContent = 'Saving alert policy…';

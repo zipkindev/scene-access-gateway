@@ -85,7 +85,7 @@ lookup service. See [security monitoring](docs/security-monitoring.md).
 - **Security visibility:** a protected, retention-bounded event console for QR
   outcomes, access requests, source IPs, offline GeoIP/ASN context, rate limits,
   non-blocking scanner/injection probe indicators, and optional redacted
-  Telegram alerts managed from Scene Management.
+  Telegram alerts with complete bot onboarding in Scene Management.
 - **Container isolation:** an Nginx gateway is the only public entrypoint; the
   Node.js backend and identity services remain on private Compose networks.
 - **Reproducible delivery:** digest-pinned base images, exact artwork and

@@ -31,6 +31,14 @@ function atomicJson(file, value) {
   fs.renameSync(temporary, file);
 }
 
+function atomicSecret(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const temporary = file + '.' + process.pid + '.' + crypto.randomBytes(6).toString('hex') + '.tmp';
+  fs.writeFileSync(temporary, value.trim() + '\n', { mode: 0o600, flag: 'wx' });
+  fs.renameSync(temporary, file);
+  fs.chmodSync(file, 0o600);
+}
+
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { return structuredClone(fallback); }
 }
@@ -103,8 +111,11 @@ class TelegramAlerts {
     this.policyFile = path.join(this.directory, 'telegram-alert-policy.json');
     this.queueFile = path.join(this.directory, 'telegram-alert-queue.json');
     this.statusFile = path.join(this.directory, 'telegram-alert-status.json');
-    this.tokenPath = options.tokenPath || process.env.TELEGRAM_BOT_TOKEN_PATH || '/run/secrets/telegram-bot-token';
-    this.chatPath = options.chatPath || process.env.TELEGRAM_CHAT_ID_PATH || '/run/secrets/telegram-chat-id';
+    this.managedTokenPath = path.join(this.directory, 'telegram-bot-token');
+    this.managedChatPath = path.join(this.directory, 'telegram-chat-id');
+    this.metadataFile = path.join(this.directory, 'telegram-integration.json');
+    this.externalTokenPath = options.tokenPath || process.env.TELEGRAM_BOT_TOKEN_PATH || null;
+    this.externalChatPath = options.chatPath || process.env.TELEGRAM_CHAT_ID_PATH || null;
     this.fetch = options.fetch || globalThis.fetch;
     this.now = options.now || (() => new Date());
     this.retryDelays = options.retryDelays || [0, 250, 1000];
@@ -112,6 +123,7 @@ class TelegramAlerts {
     const savedQueue = readJson(this.queueFile, []);
     this.queue = Array.isArray(savedQueue) ? savedQueue.filter((item) => item && typeof item.text === 'string').slice(-100) : [];
     this.delivery = readJson(this.statusFile, { lastSuccessAt: null, lastFailureAt: null, lastFailureCode: null, lastTestAt: null });
+    this.integration = readJson(this.metadataFile, { bot: null, chat: null });
     this.aggregates = new Map();
     this.cooldowns = new Map(Object.entries(this.delivery.cooldowns || {}).filter(([, until]) => Number.isFinite(until)));
     this.sent = Array.isArray(this.delivery.recentDeliveries)
@@ -122,21 +134,116 @@ class TelegramAlerts {
 
   configured() { return Boolean(this._credentials()); }
 
+  _token() {
+    return secret(this.managedTokenPath, /^\d{5,20}:[A-Za-z0-9_-]{30,}$/)
+      || (this.externalTokenPath ? secret(this.externalTokenPath, /^\d{5,20}:[A-Za-z0-9_-]{30,}$/) : null);
+  }
+
+  _chat() {
+    return secret(this.managedChatPath, /^-?\d{1,20}$/)
+      || (this.externalChatPath ? secret(this.externalChatPath, /^-?\d{1,20}$/) : null);
+  }
+
   _credentials() {
-    const token = secret(this.tokenPath, /^\d{5,20}:[A-Za-z0-9_-]{30,}$/);
-    const chat = secret(this.chatPath, /^-?\d{1,20}$/);
+    const token = this._token();
+    const chat = this._chat();
     return token && chat ? { token, chat } : null;
   }
 
   state() {
     return {
       configured: this.configured(), active: this.configured() && this.policy.enabled,
+      setup: {
+        mode: fs.existsSync(this.managedTokenPath) || fs.existsSync(this.managedChatPath) ? 'scene-management'
+          : this.externalTokenPath || this.externalChatPath ? 'mounted-files' : 'not-configured',
+        bot: this.integration.bot ? { username: this.integration.bot.username,
+          name: this.integration.bot.name } : null,
+        chat: this.integration.chat ? { title: this.integration.chat.title,
+          type: this.integration.chat.type } : null,
+      },
       policy: structuredClone(this.policy), pending: this.queue.length,
       delivery: { lastSuccessAt: this.delivery.lastSuccessAt || null,
         lastFailureAt: this.delivery.lastFailureAt || null,
         lastFailureCode: this.delivery.lastFailureCode || null,
         lastTestAt: this.delivery.lastTestAt || null },
     };
+  }
+
+  async _api(method, token, body = {}) {
+    let response;
+    try {
+      response = await this.fetch(`https://api.telegram.org/bot${token}/${method}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body), signal: AbortSignal.timeout(5000),
+      });
+    } catch (_) { throw new Error('Telegram API is unavailable'); }
+    let result;
+    try { result = await response.json(); } catch (_) { throw new Error('Telegram API returned an invalid response'); }
+    if (!response.ok || !result?.ok) throw new Error('Telegram rejected the request');
+    return result.result;
+  }
+
+  async configureToken(value) {
+    const token = String(value || '').trim();
+    if (!/^\d{5,20}:[A-Za-z0-9_-]{30,}$/.test(token)) throw new Error('Invalid Telegram bot token');
+    const bot = await this._api('getMe', token);
+    if (!bot?.is_bot || !Number.isSafeInteger(bot.id) || !/^[A-Za-z0-9_]{5,32}$/.test(bot.username || '')) {
+      throw new Error('Telegram did not return a valid bot identity');
+    }
+    atomicSecret(this.managedTokenPath, token);
+    try { fs.unlinkSync(this.managedChatPath); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    this.integration = { bot: { id: bot.id, username: bot.username,
+      name: [bot.first_name, bot.last_name].filter(Boolean).join(' ').slice(0, 128) }, chat: null };
+    atomicJson(this.metadataFile, this.integration);
+    if (this.policy.enabled) this.updatePolicy({ ...this.policy, enabled: false });
+    this.queue = [];
+    this._saveQueue();
+    return this.state();
+  }
+
+  async discoverChats() {
+    const token = this._token();
+    if (!token) throw new Error('Configure a Telegram bot token first');
+    const updates = await this._api('getUpdates', token, { limit: 100, timeout: 0,
+      allowed_updates: ['message', 'channel_post', 'my_chat_member'] });
+    const chats = new Map();
+    for (const update of Array.isArray(updates) ? updates : []) {
+      const chat = update.message?.chat || update.channel_post?.chat || update.my_chat_member?.chat;
+      if (!chat || !Number.isSafeInteger(chat.id)
+        || !['private', 'group', 'supergroup', 'channel'].includes(chat.type)) continue;
+      const title = String(chat.title || chat.username
+        || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || 'Telegram chat').slice(0, 128);
+      chats.set(String(chat.id), { id: String(chat.id), title, type: chat.type });
+    }
+    return { chats: [...chats.values()] };
+  }
+
+  async configureChat(value) {
+    const chatId = String(value || '').trim();
+    if (!/^-?\d{1,20}$/.test(chatId)) throw new Error('Invalid Telegram chat ID');
+    const token = this._token();
+    if (!token) throw new Error('Configure a Telegram bot token first');
+    const chat = await this._api('getChat', token, { chat_id: chatId });
+    if (String(chat?.id) !== chatId || !['private', 'group', 'supergroup', 'channel'].includes(chat.type)) {
+      throw new Error('Telegram did not return a valid destination');
+    }
+    atomicSecret(this.managedChatPath, chatId);
+    const title = String(chat.title || chat.username
+      || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || 'Telegram chat').slice(0, 128);
+    this.integration = { ...this.integration, chat: { id: chatId, title, type: chat.type } };
+    atomicJson(this.metadataFile, this.integration);
+    return this.state();
+  }
+
+  disconnect() {
+    for (const file of [this.managedTokenPath, this.managedChatPath, this.metadataFile]) {
+      try { fs.unlinkSync(file); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    this.integration = { bot: null, chat: null };
+    if (this.policy.enabled) this.updatePolicy({ ...this.policy, enabled: false });
+    this.queue = [];
+    this._saveQueue();
+    return this.state();
   }
 
   updatePolicy(value) {
