@@ -66,7 +66,9 @@ outcomes, access requests, session creation, unknown routes, rate limiting,
 and common probe indicators. The screenshot uses the documentation-only IP
 `203.0.113.42`; it contains no production hostname, account, or visitor data.
 Optional GeoLite2 enrichment runs locally so visitor IPs are not sent to a
-lookup service. See [security monitoring](docs/security-monitoring.md).
+lookup service. Operators can combine removable severity, event-category,
+country, exact-IP, and CIDR filters; detected locations appear beside the
+source address. See [security monitoring](docs/security-monitoring.md).
 
 ## Highlights
 
@@ -84,8 +86,9 @@ lookup service. See [security monitoring](docs/security-monitoring.md).
   assertions.
 - **Security visibility:** a protected, retention-bounded event console for QR
   outcomes, access requests, source IPs, offline GeoIP/ASN context, rate limits,
-  non-blocking scanner/injection probe indicators, and optional redacted
-  Telegram alerts with complete bot onboarding in Scene Management.
+  composable source/location/category filters, non-blocking scanner/injection
+  probe indicators, and optional redacted Telegram alerts with complete bot
+  onboarding in Scene Management.
 - **Container isolation:** an Nginx gateway is the only public entrypoint; the
   Node.js backend and identity services remain on private Compose networks.
 - **Reproducible delivery:** digest-pinned base images, exact artwork and

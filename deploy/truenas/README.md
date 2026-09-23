@@ -22,6 +22,15 @@ configuration. A real cutover must separately define reviewed published ports,
 networks, volumes, health checks, certificate paths, backups, rollback, and
 active-session gates.
 
+The protected Nginx configuration replaces the portable configuration, so it
+must also preserve the security-observability controls described in
+[`docs/security-monitoring.md`](../../docs/security-monitoring.md): JSON access
+records with both edge and upstream `X-Request-ID` values, restricted log
+retention, a per-source request zone, a concurrent-connection zone, explicit
+429 handling, body limits, and route-specific method restrictions. Confirm the
+TLS edge overwrites client-IP headers before using an address as a rate-limit
+or incident-response key.
+
 Telegram alerting is optional. When enabled, merge `compose.telegram.yaml`
 after reviewing the target's outbound network policy. The overlay attaches the
 backend to an egress-capable network; bot verification, chat discovery, test

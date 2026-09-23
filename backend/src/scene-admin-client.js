@@ -898,11 +898,179 @@ function securityMetric(value, label) {
   return item;
 }
 
-function securityLocation(source) {
-  if (!source) return 'source unavailable';
-  const place = [source.city, source.region, source.country].filter(Boolean).join(', ');
-  const network = [source.asn ? 'AS' + source.asn : null, source.organization].filter(Boolean).join(' ');
-  return [source.ip || 'unknown', place || source.scope, network].filter(Boolean).join(' · ');
+const countryNames = typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(['en'], { type: 'region' }) : null;
+const securityFilters = Object.fromEntries(['severity', 'type', 'category', 'country', 'source']
+  .map((kind) => [kind, new Map()]));
+const securityLabels = {
+  severity: 'Severity', type: 'Event', category: 'Alert', country: 'Country', source: 'Source',
+};
+
+function countryName(code) {
+  try { return countryNames?.of(code) || code; } catch (_) { return code; }
+}
+
+function readableSecurityValue(value) {
+  return String(value).replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+const securityToolbar = elements.securitySeverity.closest('.security-toolbar');
+const severityField = elements.securitySeverity.closest('.field');
+const securityQuickFilters = document.createElement('div');
+securityQuickFilters.className = 'security-quick-filters';
+securityQuickFilters.append(Object.assign(document.createElement('span'), { textContent: 'Severity:' }));
+const severityButtons = new Map();
+for (const value of ['critical', 'warning', 'info']) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'security-filter-option';
+  button.textContent = readableSecurityValue(value);
+  button.setAttribute('aria-pressed', 'false');
+  button.addEventListener('click', () => toggleSecurityFilter('severity', value, readableSecurityValue(value)));
+  severityButtons.set(value, button);
+  securityQuickFilters.append(button);
+}
+securityToolbar.before(securityQuickFilters);
+severityField.remove();
+
+function addFilterSelect(labelText, id) {
+  const label = document.createElement('label');
+  label.className = 'field';
+  label.append(labelText);
+  const select = document.createElement('select');
+  select.id = id;
+  select.append(new Option('Choose…', ''));
+  label.append(select);
+  securityToolbar.insertBefore(label, elements.securityRefresh);
+  return select;
+}
+
+const securityTypeAdd = addFilterSelect('Add event type', 'securityTypeAdd');
+const securityCategoryAdd = addFilterSelect('Add alert type', 'securityCategoryAdd');
+const securityCountryAdd = addFilterSelect('Add detected country', 'securityCountryAdd');
+const securitySourceField = document.createElement('div');
+securitySourceField.className = 'security-source-field';
+const securitySourceLabel = document.createElement('label');
+securitySourceLabel.className = 'field';
+securitySourceLabel.append('Add IP or CIDR range');
+const securitySourceInput = document.createElement('input');
+securitySourceInput.id = 'securitySourceInput';
+securitySourceInput.placeholder = '45.118.10.5 or 45.118.10.0/24';
+securitySourceInput.autocomplete = 'off';
+securitySourceLabel.append(securitySourceInput);
+const securitySourceAdd = document.createElement('button');
+securitySourceAdd.type = 'button';
+securitySourceAdd.textContent = 'Add source';
+securitySourceField.append(securitySourceLabel, securitySourceAdd);
+securityToolbar.insertBefore(securitySourceField, elements.securityRefresh);
+const securityClear = document.createElement('button');
+securityClear.type = 'button';
+securityClear.textContent = 'Clear filters';
+securityToolbar.insertBefore(securityClear, elements.securityRefresh);
+const securityFilterChips = document.createElement('div');
+securityFilterChips.className = 'security-filter-chips';
+securityToolbar.after(securityFilterChips);
+
+function renderSecurityFilters() {
+  for (const [value, button] of severityButtons) {
+    button.setAttribute('aria-pressed', String(securityFilters.severity.has(value)));
+  }
+  const chips = [];
+  for (const [kind, values] of Object.entries(securityFilters)) {
+    for (const [value, label] of values) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'security-filter-chip';
+      chip.textContent = securityLabels[kind] + ': ' + label;
+      chip.title = 'Remove this filter';
+      chip.addEventListener('click', () => {
+        securityFilters[kind].delete(value);
+        renderSecurityFilters();
+        loadSecurity();
+      });
+      chips.push(chip);
+    }
+  }
+  if (!chips.length) {
+    const empty = document.createElement('span');
+    empty.className = 'security-filter-empty';
+    empty.textContent = 'No filters applied';
+    chips.push(empty);
+  }
+  securityFilterChips.replaceChildren(...chips);
+  securityClear.disabled = !Object.values(securityFilters).some((values) => values.size);
+}
+
+function addSecurityFilter(kind, value, label = readableSecurityValue(value)) {
+  if (!value || securityFilters[kind].has(value)) return;
+  securityFilters[kind].set(value, label);
+  renderSecurityFilters();
+  loadSecurity();
+}
+
+function toggleSecurityFilter(kind, value, label) {
+  if (securityFilters[kind].has(value)) securityFilters[kind].delete(value);
+  else securityFilters[kind].set(value, label);
+  renderSecurityFilters();
+  loadSecurity();
+}
+
+function selectAddsFilter(select, kind, label = (value) => readableSecurityValue(value)) {
+  select.addEventListener('change', () => {
+    const value = select.value;
+    select.value = '';
+    if (value) addSecurityFilter(kind, value, label(value));
+  });
+}
+
+selectAddsFilter(securityTypeAdd, 'type');
+selectAddsFilter(securityCategoryAdd, 'category');
+selectAddsFilter(securityCountryAdd, 'country', countryName);
+function addSourceFilter() {
+  const value = securitySourceInput.value.trim();
+  if (!/^[0-9a-f:.]+(?:\/\d{1,3})?$/i.test(value)) {
+    elements.securityStatus.textContent = 'Enter a valid IP address or CIDR range.';
+    return;
+  }
+  securitySourceInput.value = '';
+  addSecurityFilter('source', value, value);
+}
+securitySourceAdd.addEventListener('click', addSourceFilter);
+securitySourceInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') addSourceFilter(); });
+securityClear.addEventListener('click', () => {
+  for (const values of Object.values(securityFilters)) values.clear();
+  renderSecurityFilters();
+  loadSecurity();
+});
+renderSecurityFilters();
+
+function fillSecurityOptions(select, values, label) {
+  select.replaceChildren(new Option('Choose…', ''), ...values.map((value) => new Option(label(value), value)));
+}
+
+function appendSecuritySource(detail, source) {
+  const addText = (value) => { if (value) detail.append(' · ' + value); };
+  if (!source) return addText('source unavailable');
+  if (source.ip && source.ip !== 'unknown') {
+    const ip = document.createElement('button');
+    ip.type = 'button';
+    ip.className = 'security-inline-filter';
+    ip.textContent = source.ip;
+    ip.title = 'Filter by this IP';
+    ip.addEventListener('click', () => addSecurityFilter('source', source.ip, source.ip));
+    detail.append(' · ', ip);
+  } else addText(source.ip || 'unknown');
+  addText([source.city, source.region].filter(Boolean).join(', '));
+  if (source.country) {
+    const country = document.createElement('button');
+    country.type = 'button';
+    country.className = 'security-inline-filter';
+    country.textContent = countryName(source.country) + ' (' + source.country + ')';
+    country.title = 'Filter by this country';
+    country.addEventListener('click', () => addSecurityFilter('country', source.country, countryName(source.country)));
+    detail.append(' · ', country);
+  } else addText(source.scope);
+  if (Number.isFinite(source.accuracyRadiusKm)) addText('approx. ±' + source.accuracyRadiusKm + ' km');
+  addText([source.asn ? 'AS' + source.asn : null, source.organization].filter(Boolean).join(' '));
 }
 
 const telegramCategories = [...document.querySelectorAll('[data-telegram-category]')];
@@ -1073,14 +1241,23 @@ async function loadSecurity() {
   elements.securityStatus.textContent = 'Loading recent events…';
   elements.securityRefresh.disabled = true;
   try {
-    const severity = elements.securitySeverity.value;
+    const parameters = new URLSearchParams({ limit: '250' });
+    for (const [kind, values] of Object.entries(securityFilters)) {
+      for (const value of values.keys()) parameters.append(kind, value);
+    }
     const [summaryResponse, eventsResponse] = await Promise.all([
       fetch('/api/security/summary', { cache: 'no-store' }),
-      fetch('/api/security/events?limit=100' + (severity ? '&severity=' + encodeURIComponent(severity) : ''), { cache: 'no-store' }),
+      fetch('/api/security/events?' + parameters, { cache: 'no-store' }),
     ]);
     if (!summaryResponse.ok || !eventsResponse.ok) throw new Error('Security monitoring is unavailable');
     const summary = await summaryResponse.json();
     const result = await eventsResponse.json();
+    const options = summary.filterOptions || { types: [], categories: [], countries: [] };
+    fillSecurityOptions(securityTypeAdd, options.types || [], readableSecurityValue);
+    fillSecurityOptions(securityCategoryAdd, options.categories || [], readableSecurityValue);
+    const countries = (options.countries || []).map((item) => item.country);
+    fillSecurityOptions(securityCountryAdd, countries,
+      (value) => countryName(value) + ' (' + value + ')');
     await loadTelegram();
     elements.securitySummary.replaceChildren(
       securityMetric(summary.total, 'events · 24 hours'),
@@ -1091,21 +1268,33 @@ async function loadSecurity() {
       securityMetric(summary.critical, 'critical signals'),
       securityMetric(summary.integrityFailures, 'integrity failures'),
     );
-    elements.securityEvents.replaceChildren(...result.events.map((event) => {
+    const rows = result.events.map((event) => {
       const row = document.createElement('div');
       row.className = 'security-event ' + (event.integrityValid === false ? 'critical' : event.severity);
       const heading = document.createElement('strong');
       heading.textContent = event.type.replaceAll('_', ' ') + ' · '
         + (event.integrityValid === false ? 'integrity check failed' : event.severity);
       const detail = document.createElement('div');
-      detail.textContent = new Date(event.at).toLocaleString() + ' · ' + securityLocation(event.source)
-        + (event.outcome ? ' · ' + event.outcome : '') + (event.category ? ' · ' + event.category : '')
-        + (event.http?.path ? ' · ' + event.http.method + ' ' + event.http.path : '');
+      detail.append(new Date(event.at).toLocaleString());
+      appendSecuritySource(detail, event.source);
+      if (event.outcome) detail.append(' · ' + event.outcome);
+      if (event.category) detail.append(' · ' + readableSecurityValue(event.category));
+      if (event.http?.path) detail.append(' · ' + event.http.method + ' ' + event.http.path
+        + (event.http.status !== null ? ' → ' + event.http.status : ''));
+      if (event.requestId) detail.append(' · request ' + event.requestId);
       row.append(heading, detail);
       return row;
-    }));
+    });
+    if (!rows.length) {
+      const empty = document.createElement('div');
+      empty.className = 'security-event';
+      empty.textContent = 'No security events match the active filters.';
+      rows.push(empty);
+    }
+    elements.securityEvents.replaceChildren(...rows);
     const geo = summary.geoip;
-    elements.securityStatus.textContent = 'Retention: ' + summary.retentionDays + ' days · local GeoIP city '
+    elements.securityStatus.textContent = 'Showing ' + result.events.length + ' event'
+      + (result.events.length === 1 ? '' : 's') + ' · retention: ' + summary.retentionDays + ' days · local GeoIP city '
       + (geo.city.loaded ? 'loaded' : 'not configured') + ' · ASN ' + (geo.asn.loaded ? 'loaded' : 'not configured')
       + ' · ledger ' + formatBytes(summary.storage.bytes) + ' / ' + formatBytes(summary.storage.maximumBytes)
       + (summary.storage.limited ? ' · storage limit reached' : '')
@@ -1115,7 +1304,6 @@ async function loadSecurity() {
   finally { elements.securityRefresh.disabled = false; }
 }
 elements.securityRefresh.addEventListener('click', loadSecurity);
-elements.securitySeverity.addEventListener('change', loadSecurity);
 elements.securityPanel.addEventListener('toggle', () => { if (elements.securityPanel.open) loadSecurity(); });
 
 async function load(preserveScene = false) {

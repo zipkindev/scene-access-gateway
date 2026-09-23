@@ -40,17 +40,57 @@ test('request classification reports categories without retaining the payload', 
   assert.equal(sourceIp({ headers: { 'x-portal-source-ip': 'not-an-ip' } }), 'unknown');
 });
 
+test('probe events retain response status and a request correlation ID', () => temporary((directory) => {
+  const events = new SecurityEvents(directory, noGeo, { retentionDays: 7 });
+  const request = { method: 'GET', url: '/.env?value=UNION%20SELECT%20password',
+    securityRequestId: '12345678-1234-4abc-8def-1234567890ab',
+    headers: { 'x-portal-source-ip': '203.0.113.10' } };
+  events.recordRequestFindings(request, new URL(request.url, 'https://portal.example'), 404);
+  const written = events.list({ limit: 10 });
+  assert.equal(written.length, 2);
+  assert.ok(written.every((event) => event.http.status === 404));
+  assert.ok(written.every((event) => event.requestId === request.securityRequestId));
+  assert.ok(written.every((event) => !JSON.stringify(event).includes('password')));
+}));
+
+test('public Nginx logs correlation metadata and applies bounded source limits', () => {
+  const config = fs.readFileSync(path.join(__dirname, '../../../frontend/nginx/nginx.conf'), 'utf8');
+  assert.match(config, /log_format scene_access escape=json/);
+  assert.match(config, /"request_uri":"\$request_uri"/);
+  assert.match(config, /"backend_request_id":"\$upstream_http_x_request_id"/);
+  assert.match(config, /limit_req_zone \$binary_remote_addr zone=portal_requests:/);
+  assert.match(config, /limit_req_status 429/);
+  assert.match(config, /limit_conn_status 429/);
+  assert.match(config, /limit_req zone=portal_requests burst=40 nodelay/);
+  assert.match(config, /limit_conn portal_connections 20/);
+});
+
+test('Scene Management provides composable security filter controls', () => {
+  const client = fs.readFileSync(path.join(__dirname, '../scene-admin-client.js'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '../scene-admin.html'), 'utf8');
+  for (const marker of ['security-filter-option', 'security-filter-chip', 'Add event type',
+    'Add alert type', 'Add detected country', 'Add IP or CIDR range', 'Clear filters']) {
+    assert.match(client + html, new RegExp(marker));
+  }
+  assert.match(client, /parameters\.append\(kind, value\)/);
+  assert.match(client, /Filter by this IP/);
+  assert.match(client, /Filter by this country/);
+  assert.match(client, /accuracyRadiusKm/);
+});
+
 test('security events persist bounded structured metadata and hash identities', () => temporary((directory) => {
   const events = new SecurityEvents(directory, noGeo, { retentionDays: 7 });
   const request = { method: 'POST', url: '/login/' + 'b'.repeat(43), headers: {
     'x-portal-source-ip': '203.0.113.8', 'user-agent': 'Example browser',
-  } };
+  }, securityRequestId: '12345678-1234-4abc-8def-1234567890ab' };
   const written = events.record('qr_login_attempt', { request, pathname: request.url,
-    ip: sourceIp(request), identity: 'Person@Example.com', outcome: 'not_eligible', status: 200 });
+    ip: sourceIp(request), identity: 'Person@Example.com', outcome: 'not_eligible', status: 200,
+    requestId: request.securityRequestId });
   assert.equal(written.http.path, '/login/:token');
   assert.equal(written.source.ip, '203.0.113.8');
   assert.match(written.integrity, /^[A-Za-z0-9_-]{43}$/);
   assert.match(written.identityHash, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(written.requestId, request.securityRequestId);
   assert.doesNotMatch(JSON.stringify(written), /Person@Example\.com/i);
   const listed = events.list({ limit: 10 });
   assert.equal(listed.length, 1);
@@ -65,6 +105,27 @@ test('GeoIP lookup fails closed when local databases are absent', () => {
   assert.deepEqual(lookup.lookup('192.168.1.20'), { scope: 'private' });
   assert.equal(lookup.lookup('203.0.113.8').scope, 'public');
 });
+
+test('security event filters compose across severity, category, country, exact IP, and CIDR', () => temporary((directory) => {
+  const events = new SecurityEvents(directory, noGeo);
+  events.record('suspicious_request', { ip: '45.118.10.5', severity: 'warning',
+    category: 'automated_scanner_probe', outcome: 'observed' });
+  events.record('suspicious_request', { ip: '203.0.113.8', severity: 'critical',
+    category: 'sql_injection_probe', outcome: 'observed' });
+  events.record('portal_visit', { ip: '192.168.1.20', severity: 'info', outcome: 'challenge_created' });
+  events.geoip = { ...noGeo, lookup(ip) { return ip === '45.118.10.5'
+    ? { scope: 'public', country: 'LT', city: 'Vilnius' }
+    : ip === '203.0.113.8' ? { scope: 'public', country: 'US' } : { scope: 'private' }; } };
+  assert.equal(events.list({ severity: ['warning', 'critical'] }).length, 2);
+  assert.equal(events.list({ category: ['automated_scanner_probe'], country: ['LT'] }).length, 1);
+  assert.equal(events.list({ source: ['45.118.10.0/24'] })[0].source.city, 'Vilnius');
+  assert.equal(events.list({ source: ['203.0.113.8'] }).length, 1);
+  assert.throws(() => events.list({ source: ['45.118.10.0/99'] }), /Invalid source filter/);
+  assert.throws(() => events.list({ country: ['Lithuania'] }), /Invalid country filter/);
+  const summary = events.summary();
+  assert.deepEqual(summary.filterOptions.countries, [{ country: 'LT', count: 1 }, { country: 'US', count: 1 }]);
+  assert.ok(summary.filterOptions.categories.includes('automated_scanner_probe'));
+}));
 
 test('authenticated Scene Management exposes summary and redacted events', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sag-security-admin-'));
@@ -81,6 +142,11 @@ test('authenticated Scene Management exposes summary and redacted events', async
     assert.doesNotMatch(JSON.stringify(body), /private@example\.com/);
     const summary = JSON.parse((await invoke(handler, '/api/security/summary', { 'x-scene-admin': 'owner' })).body);
     assert.equal(summary.accessRequests, 1);
+    const filtered = await invoke(handler, '/api/security/events?severity=info&severity=warning&source=203.0.113.0%2F24', { 'x-scene-admin': 'owner' });
+    assert.equal(filtered.status, 200);
+    assert.equal(JSON.parse(filtered.body).events.length, 1);
+    const invalid = await invoke(handler, '/api/security/events?source=203.0.113.0%2F99', { 'x-scene-admin': 'owner' });
+    assert.equal(invalid.status, 400);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

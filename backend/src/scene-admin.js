@@ -261,10 +261,18 @@ function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTele
     }
     if (url.pathname === '/api/security/events' && request.method === 'GET') {
       const keys = [...url.searchParams.keys()];
-      if (keys.some((key) => !['limit', 'severity', 'type', 'since'].includes(key)) || new Set(keys).size !== keys.length) {
+      if (keys.some((key) => !['limit', 'severity', 'type', 'category', 'country', 'source', 'since'].includes(key))
+        || ['limit', 'since'].some((key) => url.searchParams.getAll(key).length > 1)) {
         return json(response, 400, { error: 'Invalid security-event query' });
       }
-      return json(response, 200, { events: securityEvents.list(Object.fromEntries(url.searchParams)) });
+      try {
+        return json(response, 200, { events: securityEvents.list({
+          limit: url.searchParams.get('limit'), since: url.searchParams.get('since'),
+          severity: url.searchParams.getAll('severity'), type: url.searchParams.getAll('type'),
+          category: url.searchParams.getAll('category'), country: url.searchParams.getAll('country'),
+          source: url.searchParams.getAll('source'),
+        }) });
+      } catch (_) { return json(response, 400, { error: 'Invalid security-event query' }); }
     }
     if (url.pathname === '/api/security/telegram' && request.method === 'GET') {
       return json(response, 200, telegramAlerts.state());
