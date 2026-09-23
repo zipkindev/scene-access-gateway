@@ -40,6 +40,21 @@ HSTS starter policy at the TLS edge; do not lengthen it or add
 `includeSubDomains` or `preload` until every covered hostname and
 certificate-renewal path has been reviewed.
 
+The reusable WAF image, Nginx templates, and shared-network-namespace Compose
+pattern are tracked in [`deploy/waf/`](../waf/README.md). In that pattern the
+WAF owns the published TLS listener and forwards only to a loopback listener in
+the separate hardened origin Nginx container. TrueNAS overrides must supply the
+hostname allowlist, one allowed health-check host, TLS mount, protected audit
+directory, origin configuration, published port, and certificate-reloader
+settings. Keep those target values ignored. Do not expose the loopback origin
+listener or make the backend directly reachable.
+
+The baseline WAF policy is OWASP CRS 4.29.0 on ModSecurity 3.0.16 in
+`DetectionOnly`. Audit parts `AHZ` exclude request headers, cookies,
+authorization values, request/response bodies, and uploads. WAF audit records
+remain separate from the application's Telegram pipeline until a reviewed,
+sanitized adapter is added.
+
 Telegram alerting is optional. When enabled, merge `compose.telegram.yaml`
 after reviewing the target's outbound network policy. The overlay attaches the
 backend to an egress-capable network; bot verification, chat discovery, test

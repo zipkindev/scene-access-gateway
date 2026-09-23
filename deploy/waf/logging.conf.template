@@ -1,0 +1,17 @@
+log_format waf_json escape=json '{'
+    '"time":"$time_iso8601",'
+    '"request_id":"$request_id",'
+    '"remote_addr":"$remote_addr",'
+    '"host":"$host",'
+    '"method":"$request_method",'
+    '"request_uri":"$request_uri",'
+    '"status":$status,'
+    '"bytes_sent":$bytes_sent,'
+    '"request_time":$request_time,'
+    '"upstream_time":"$upstream_response_time",'
+    '"upstream_status":"$upstream_status",'
+    '"user_agent":"$http_user_agent"'
+'}';
+
+access_log ${ACCESSLOG} waf_json;
+error_log ${ERRORLOG} ${LOGLEVEL};

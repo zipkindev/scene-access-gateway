@@ -12,6 +12,11 @@ Supported delivery patterns are:
 - air-gapped image export/load;
 - guarded TrueNAS deployment.
 
+The reusable optional WAF component is in [`waf/`](waf/README.md). It packages
+Nginx, ModSecurity, and OWASP CRS in one edge image and documents the hardened
+WAF-to-origin Compose boundary without embedding target hostnames, certificate
+paths, addresses, or storage locations.
+
 Use [Scene Access Platform](https://github.com/zipkindev/scene-access-platform)
 for the tested Gateway + Wolf composition. See the full
 [deployment guide](../docs/deployment/README.md) for image naming, offline

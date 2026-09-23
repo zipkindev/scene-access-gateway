@@ -1,0 +1,122 @@
+services:
+  access-proxy:
+    image: ${SAG_ORIGIN_IMAGE:?Set the reviewed hardened origin image}
+    expose:
+      - "${SAG_ORIGIN_PORT:-44336}"
+    volumes:
+      - ${SAG_ORIGIN_CONFIG:?Set the protected origin Nginx configuration}:/etc/nginx/nginx.conf:ro
+      - ${SAG_TLS_DIR:?Set the protected TLS directory}:/run/access-tls:ro
+    read_only: true
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=1770
+      - /var/cache/nginx:uid=101,gid=101,mode=0750
+      - /var/run:uid=101,gid=101,mode=0750
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O /dev/null --no-check-certificate https://127.0.0.1:${SAG_ORIGIN_PORT:-44336}/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  access-waf:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${SAG_IMAGE_NAMESPACE:-scene-access-gateway}/waf:${SAG_IMAGE_TAG:-dev}
+    user: "101:101"
+    network_mode: service:access-proxy
+    environment:
+      BACKEND: https://127.0.0.1:${SAG_ORIGIN_PORT:-44336}
+      WAF_LISTEN_PORT: "${SAG_WAF_PORT:-44334}"
+      WAF_SERVER_NAMES: ${SAG_WAF_SERVER_NAMES:?Set the reviewed public host allowlist}
+      SSL_CERT_FILE: /run/access-tls/fullchain.pem
+      SSL_CERT_KEY_FILE: /run/access-tls/privkey.pem
+      SERVER_HEADER: ""
+      MODSEC_RULE_ENGINE: DetectionOnly
+      BLOCKING_PARANOIA: "1"
+      DETECTION_PARANOIA: "2"
+      ANOMALY_INBOUND: "5"
+      ANOMALY_OUTBOUND: "4"
+      MODSEC_AUDIT_ENGINE: RelevantOnly
+      MODSEC_AUDIT_LOG_TYPE: Concurrent
+      MODSEC_AUDIT_LOG: /var/log/modsecurity/audit/index.log
+      MODSEC_AUDIT_STORAGE_DIR: /var/log/modsecurity/audit
+      MODSEC_AUDIT_LOG_FORMAT: JSON
+      MODSEC_AUDIT_LOG_PARTS: AHZ
+      MODSEC_REQ_BODY_LIMIT: "16777216"
+      MODSEC_REQ_BODY_NOFILES_LIMIT: "131072"
+      MODSEC_UPLOAD_KEEP_FILES: "Off"
+      ACCESSLOG: /dev/stdout
+      ERRORLOG: /dev/stderr
+      LOGLEVEL: warn
+    volumes:
+      - ${SAG_TLS_DIR:?Set the protected TLS directory}:/run/access-tls:ro
+      - ${SAG_WAF_AUDIT_DIR:?Set the protected WAF audit directory}:/var/log/modsecurity/audit
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=1770
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      access-proxy:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O /dev/null --no-check-certificate --header='Host: ${SAG_WAF_HEALTH_HOST:?Set one allowed health-check host}' https://127.0.0.1:${SAG_WAF_PORT:-44334}/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 25m
+        max-file: "8"
+
+  cert-reloader:
+    image: ${SAG_ORIGIN_IMAGE:?Set the reviewed hardened origin image}
+    user: "101:101"
+    pid: service:access-proxy
+    network_mode: service:access-proxy
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - >-
+        last="$$(sha256sum /run/access-tls/fullchain.pem /run/access-tls/privkey.pem 2>/dev/null || true)";
+        while true; do sleep 30;
+        current="$$(sha256sum /run/access-tls/fullchain.pem /run/access-tls/privkey.pem 2>/dev/null || true)";
+        if [ -n "$$current" ] && [ "$$current" != "$$last" ]; then kill -HUP 1; fi;
+        last="$$current"; done
+    volumes:
+      - ${SAG_TLS_DIR:?Set the protected TLS directory}:/run/access-tls:ro
+    read_only: true
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=1770
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      access-proxy:
+        condition: service_healthy
+
+  waf-cert-reloader:
+    image: ${SAG_IMAGE_NAMESPACE:-scene-access-gateway}/waf:${SAG_IMAGE_TAG:-dev}
+    user: "101:101"
+    pid: service:access-waf
+    network_mode: service:access-proxy
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - >-
+        last="$$(sha256sum /run/access-tls/fullchain.pem /run/access-tls/privkey.pem 2>/dev/null || true)";
+        while true; do sleep 30;
+        current="$$(sha256sum /run/access-tls/fullchain.pem /run/access-tls/privkey.pem 2>/dev/null || true)";
+        if [ -n "$$current" ] && [ "$$current" != "$$last" ]; then kill -HUP 1; fi;
+        last="$$current"; done
+    volumes:
+      - ${SAG_TLS_DIR:?Set the protected TLS directory}:/run/access-tls:ro
+    read_only: true
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=1770
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      access-waf:
+        condition: service_healthy

@@ -91,12 +91,15 @@ credential removal are managed from the same protected console. See
   composable source/location/category filters, non-blocking scanner/injection
   probe indicators, and optional redacted Telegram alerts with complete bot
   onboarding in Scene Management.
-- **Container isolation:** an Nginx gateway is the only public entrypoint; the
-  Node.js backend and identity services remain on private Compose networks.
-- **Defense in depth:** the portable edge rejects common secret-file probes,
-  strips management trust headers, hides management routes, normalizes
-  security logs, bounds slow requests, compresses text responses, and applies
-  browser isolation headers in addition to any deployment WAF.
+- **Container isolation:** the selected Nginx edge is the only public
+  entrypoint. With the WAF enabled, the origin gateway, Node.js backend, and
+  identity services remain on private Compose networks.
+- **Defense in depth:** an optional tracked OWASP CRS 4.29.0/ModSecurity 3.0.16
+  WAF can precede the hardened origin Nginx. The portable edge rejects common
+  secret-file probes, strips management trust headers, hides management
+  routes, normalizes security logs, bounds slow requests, compresses text
+  responses, and applies browser isolation headers in addition to any
+  deployment WAF.
 - **Reproducible delivery:** digest-pinned base images, exact artwork and
   optional-audio checksums, deterministic public asset archives, host tests,
   and isolated Compose smoke tests.
@@ -111,10 +114,12 @@ credential removal are managed from the same protected console. See
 
 ```mermaid
 flowchart LR
-    Visitor[Visitor browsers] -->|HTTPS 443| Gateway[Nginx public gateway]
-    Editor[Authenticated scene manager] --> Gateway
+    Visitor[Visitor browsers] -->|public HTTPS| WAF[Optional OWASP CRS WAF<br/>Nginx + ModSecurity]
+    WAF -->|private network or loopback HTTPS| Gateway[Hardened origin Nginx]
+    Editor[Authenticated scene manager] -->|private editor route| Gateway
     Gateway -->|private Compose network| Backend[Node.js portal backend]
     Gateway -->|only after session check| Services[Approved internal services]
+    WAF --> WafAudit[(Restricted WAF audit)]
     Backend --> State[(Scene, challenge, and audit state)]
     Backend --> Security[(Bounded security-event ledger)]
     Backend --> Mail[SMTP confirmation]
@@ -125,13 +130,15 @@ flowchart LR
 
     classDef public fill:#dbeafe,stroke:#2563eb,color:#111827
     classDef private fill:#ecfdf5,stroke:#059669,color:#111827
-    class Visitor,Editor,Gateway public
-    class Backend,State,Security,Mail,Authentik,Postgres,Services,Extension private
+    class Visitor,WAF public
+    class Editor,Gateway,Backend,State,Security,Mail,Authentik,Postgres,Services,Extension,WafAudit private
 ```
 
-The portable default exposes only loopback development listeners. Production
-TLS, hostnames, editor authentication, and network policy belong in reviewed
-deployment configuration rather than the application image.
+The portable default exposes only loopback development listeners. The optional
+[WAF deployment component](deploy/waf/README.md) supplies the reusable image,
+templates, observation policy, and hardened Compose pattern. Production TLS,
+hostnames, editor authentication, audit storage, and network policy remain
+reviewed deployment configuration rather than image content.
 
 More detail is available in the [architecture notes](docs/architecture/README.md).
 

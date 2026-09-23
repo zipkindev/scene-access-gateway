@@ -13,6 +13,7 @@ done
 sh -n "$repository_root"/scripts/*.sh
 docker compose -f "$repository_root/compose.yaml" config --quiet
 docker compose -f "$repository_root/compose.yaml" -f "$repository_root/compose.maxmind.yaml" config --quiet
+"$repository_root/scripts/check-waf.sh"
 
 if [ -d "$repository_root/backend/src/node_modules" ]; then
   (cd "$repository_root/backend/src" && npm test)
