@@ -27,6 +27,23 @@ test('dual identity survives approval and session revocation', () => {
   }
 });
 
+test('read-only lookups do not rewrite state and cleanup is throttled', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'access-portal-read-only-'));
+  try {
+    const store = new PortalStore(directory);
+    const challenge = store.createChallenge(tokenHash('browser'), Date.now() + 60_000);
+    const file = path.join(directory, 'state.json');
+    const before = fs.statSync(file).mtimeNs;
+    assert.ok(store.getChallenge(challenge));
+    assert.equal(store.listRequests().pendingCount, 0);
+    assert.equal(fs.statSync(file).mtimeNs, before);
+    assert.notEqual(store.purge(), false);
+    const afterPurge = fs.statSync(file).mtimeNs;
+    assert.equal(store.purge(), false);
+    assert.equal(fs.statSync(file).mtimeNs, afterPurge);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('firewall approval cannot authorize TorrentHarbor and expires independently', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'access-portal-destinations-'));
   try {

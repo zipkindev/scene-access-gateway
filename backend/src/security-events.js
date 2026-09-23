@@ -99,6 +99,11 @@ class SecurityEvents {
     this.buckets = new Map();
     this.listeners = new Set();
     this.suppressed = 0;
+    this.asyncWrites = options.asyncWrites === true;
+    this.pendingBytes = 0;
+    this.writeQueue = [];
+    this.writing = false;
+    this.flushWaiters = [];
     this.cleanup();
   }
 
@@ -125,6 +130,42 @@ class SecurityEvents {
   }
 
   _hash(value) { return crypto.createHmac('sha256', this.key).update(String(value)).digest('base64url'); }
+
+  _committed(event, bytes) {
+    this.totalBytes += bytes;
+    console.log(JSON.stringify({ event: 'security_event', id: event.id, type: event.type,
+      severity: event.severity, outcome: event.outcome, category: event.category }));
+    this.cleanup();
+    for (const listener of this.listeners) {
+      try { listener({ ...event, integrityValid: true }); } catch (_) { /* alert delivery is isolated */ }
+    }
+  }
+
+  _resolveFlushes() {
+    if (this.writing || this.writeQueue.length) return;
+    for (const resolve of this.flushWaiters.splice(0)) resolve();
+  }
+
+  _drainWrites() {
+    if (this.writing || !this.writeQueue.length) return this._resolveFlushes();
+    this.writing = true;
+    const item = this.writeQueue.shift();
+    fs.appendFile(item.file, item.line, { mode: 0o600 }, (error) => {
+      this.pendingBytes -= item.bytes;
+      this.writing = false;
+      if (error) {
+        this.suppressed += 1;
+        console.error(JSON.stringify({ event: 'security_event_write_failed', type: item.event.type,
+          error: error.code || error.name || 'Error' }));
+      } else this._committed(item.event, item.bytes);
+      this._drainWrites();
+    });
+  }
+
+  flush() {
+    if (!this.asyncWrites || (!this.writing && !this.writeQueue.length)) return Promise.resolve();
+    return new Promise((resolve) => this.flushWaiters.push(resolve));
+  }
 
   _admit(ip, severity, now = Date.now()) {
     const window = Math.floor(now / 60000);
@@ -165,18 +206,20 @@ class SecurityEvents {
     const canonical = JSON.stringify(event);
     event.integrity = this._hash(canonical);
     const line = JSON.stringify(event) + '\n';
-    if (this.totalBytes + Buffer.byteLength(line) > this.maxBytes) {
+    const bytes = Buffer.byteLength(line);
+    if (this.totalBytes + this.pendingBytes + bytes > this.maxBytes) {
       this.storageLimited = true;
       this.suppressed += 1;
       return null;
     }
-    fs.appendFileSync(path.join(this.directory, at.slice(0, 10) + '.jsonl'), line, { mode: 0o600 });
-    this.totalBytes += Buffer.byteLength(line);
-    console.log(JSON.stringify({ event: 'security_event', id: event.id, type, severity,
-      outcome: event.outcome, category: event.category }));
-    this.cleanup();
-    for (const listener of this.listeners) {
-      try { listener({ ...event, integrityValid: true }); } catch (_) { /* alert delivery is isolated */ }
+    const file = path.join(this.directory, at.slice(0, 10) + '.jsonl');
+    if (this.asyncWrites) {
+      this.pendingBytes += bytes;
+      this.writeQueue.push({ file, line, bytes, event });
+      this._drainWrites();
+    } else {
+      fs.appendFileSync(file, line, { mode: 0o600 });
+      this._committed(event, bytes);
     }
     return event;
   }

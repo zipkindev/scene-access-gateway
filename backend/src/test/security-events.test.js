@@ -56,13 +56,39 @@ test('probe events retain response status and a request correlation ID', () => t
 test('public Nginx logs correlation metadata and applies bounded source limits', () => {
   const config = fs.readFileSync(path.join(__dirname, '../../../frontend/nginx/nginx.conf'), 'utf8');
   assert.match(config, /log_format scene_access escape=json/);
-  assert.match(config, /"request_uri":"\$request_uri"/);
+  assert.doesNotMatch(config, /\$request_uri/);
+  assert.match(config, /"route":"\$scene_log_route"/);
+  assert.match(config, /\/\$1\/:token/);
   assert.match(config, /"backend_request_id":"\$upstream_http_x_request_id"/);
   assert.match(config, /limit_req_zone \$binary_remote_addr zone=portal_requests:/);
   assert.match(config, /limit_req_status 429/);
   assert.match(config, /limit_conn_status 429/);
   assert.match(config, /limit_req zone=portal_requests burst=40 nodelay/);
   assert.match(config, /limit_conn portal_connections 20/);
+  assert.match(config, /location \^~ \/internal\/torrentharbor-management\//);
+  assert.match(config, /proxy_set_header X-Management-Source-IP ""/);
+  assert.match(config, /client_header_timeout 10s/);
+  assert.match(config, /gzip on/);
+  const server = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
+  assert.match(server, /peerIp\(req\) !== MANAGEMENT_SOURCE_IP/);
+  assert.doesNotMatch(server, /req\.headers\[['"]x-management-source-ip['"]\]/);
+});
+
+test('asynchronous event writes notify subscribers only after durable append', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sag-security-async-'));
+  try {
+    const events = new SecurityEvents(directory, noGeo, { asyncWrites: true });
+    let notified = false;
+    events.subscribe(() => {
+      const files = fs.readdirSync(path.join(directory, 'security-events')).filter((file) => file.endsWith('.jsonl'));
+      assert.equal(files.length, 1);
+      assert.match(fs.readFileSync(path.join(directory, 'security-events', files[0]), 'utf8'), /portal_visit/);
+      notified = true;
+    });
+    events.record('portal_visit', { ip: '203.0.113.10', outcome: 'challenge_created' });
+    await events.flush();
+    assert.equal(notified, true);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('Scene Management provides composable security filter controls', () => {

@@ -35,13 +35,13 @@ usernames are keyed hashes.
 QR tokens, cookies, passwords, access tokens, request bodies, query strings,
 and full user-agent strings are never written to the security ledger.
 
-The frontend writes JSON access records to standard output. These contain the
-exact request target, full user agent, source address, response status, timing,
-Nginx edge request ID, and backend request ID. Treat these records as protected
-security data: the exact target may contain a QR token or a query value. Apply
-bounded retention and restricted access in the container logging driver or
-central log platform. Do not paste unredacted access records into tickets or
-chat.
+The frontend writes JSON access records to standard output. These contain a
+normalized route without the query string, full user agent, source address,
+response status, timing, Nginx edge request ID, and backend request ID. Login,
+verification, and challenge tokens are replaced with `:token`. Treat these
+records as protected security data anyway: source addresses and user agents
+may still be personal or identifying. Apply bounded retention and restricted
+access in the container logging driver or central log platform.
 
 ## Alert investigation
 
@@ -52,7 +52,7 @@ ledger is persistent but the container log may not be.
 1. Record the alert window in UTC, category, source address, normalized path,
    response status, and request ID from Scene Management.
 2. Search the frontend JSON access log for the same `backend_request_id`. This
-   returns the exact `request_uri`, edge status, timing, and user agent.
+   returns the normalized `route`, edge status, timing, and user agent.
 3. Group surrounding records by `remote_addr`, user agent, method, target, and
    status. Compare their times with Authentik, TLS-edge, firewall, and upstream
    application logs.
@@ -88,6 +88,12 @@ off-host unless an approved incident-response process requires it.
 The backend accepts `X-Portal-Source-IP` only because it is private on the
 Compose network and the public Nginx gateway overwrites that header. Never
 publish the backend port directly.
+
+The public listener removes `X-Management-Source-IP` and denies
+`/internal/torrentharbor-management/`. A trusted management caller must use the
+private backend network; the backend compares its direct TCP peer address with
+`MANAGEMENT_SOURCE_IP`. Forwarded source headers are never sufficient for
+management authorization.
 
 If another reverse proxy terminates public TLS, configure that proxy to
 replace client-IP headers and configure Nginx to trust only the exact proxy
@@ -256,6 +262,12 @@ access/error logs and consider a reviewed WAF or CrowdSec-style remediation
 layer. Introduce automatic blocking only after observing false positives;
 dashboard classifications in this project are intentionally non-blocking.
 
+Keep new WAF policies in observation mode through representative portal, QR,
+login, editor, asset, and private-service flows. Compare observations with the
+portable Nginx denials, then enable only high-confidence rules in small groups.
+The application and portable edge continue validating requests even after WAF
+enforcement is enabled.
+
 The portable public listener applies a deliberately conservative per-source
 ceiling of 10 requests per second with a burst of 40 and 20 concurrent
 connections. A production TLS proxy that replaces the portable Nginx
@@ -275,3 +287,7 @@ and appear in the access log but do not reach the application ledger.
    confirm they appear in Scene Management without sensitive payloads.
 7. Record the recovery and incident-response procedure before enabling
    automatic bans.
+8. Confirm raw queries and QR/login/challenge tokens do not appear in frontend
+   logs, and confirm a forged management-source header receives 404.
+9. Verify TLS headers, starting HSTS with a short lifetime before considering
+   `includeSubDomains` or preload.

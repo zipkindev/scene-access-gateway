@@ -48,6 +48,10 @@ function send(response, status, headers, body) {
     'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
+    'X-Permitted-Cross-Domain-Policies': 'none',
+    'Permissions-Policy': 'camera=(), geolocation=(), microphone=(), payment=(), usb=()',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Resource-Policy': 'same-origin',
     ...headers,
   });
   response.end(body);
@@ -95,11 +99,7 @@ function readJson(request) {
     request.setEncoding('utf8');
     request.on('data', (part) => {
       bytes += Buffer.byteLength(part);
-      if (bytes > 65536) {
-        reject(new Error('Request too large'));
-        request.destroy();
-        return;
-      }
+      if (bytes > 65536) return reject(Object.assign(new Error('Request too large'), { code: 'REQUEST_TOO_LARGE' }));
       body += part;
     });
     request.on('end', () => {
@@ -109,6 +109,7 @@ function readJson(request) {
         resolve(value);
       } catch (error) { reject(error); }
     });
+    request.on('aborted', () => reject(Object.assign(new Error('Request aborted'), { code: 'REQUEST_ABORTED' })));
     request.on('error', reject);
   });
 }
@@ -125,10 +126,10 @@ function readImage(request) {
       size += part.length;
       if (size > 15 * 1024 * 1024) {
         reject(new Error('Image exceeds size limit'));
-        request.destroy();
       } else parts.push(part);
     });
     request.on('end', () => resolve(Buffer.concat(parts)));
+    request.on('aborted', () => reject(Object.assign(new Error('Request aborted'), { code: 'REQUEST_ABORTED' })));
     request.on('error', reject);
   });
 }

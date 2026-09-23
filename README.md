@@ -93,6 +93,10 @@ credential removal are managed from the same protected console. See
   onboarding in Scene Management.
 - **Container isolation:** an Nginx gateway is the only public entrypoint; the
   Node.js backend and identity services remain on private Compose networks.
+- **Defense in depth:** the portable edge rejects common secret-file probes,
+  strips management trust headers, hides management routes, normalizes
+  security logs, bounds slow requests, compresses text responses, and applies
+  browser isolation headers in addition to any deployment WAF.
 - **Reproducible delivery:** digest-pinned base images, exact artwork and
   optional-audio checksums, deterministic public asset archives, host tests,
   and isolated Compose smoke tests.
@@ -312,6 +316,13 @@ See the [deployment guide](docs/deployment/README.md).
 - Probe classifications are investigation signals, not claims that an exploit
   succeeded. Edge access logs, Authentik events, and a reviewed WAF or
   remediation layer remain separate controls.
+- Public ingress must not route `/internal/torrentharbor-management/`. Trusted
+  management callers connect over the private network and are checked against
+  their TCP peer address; internet-supplied identity or source headers are not
+  authorization.
+- Frontend logs contain normalized routes rather than raw query strings or
+  one-time tokens. Versioned scripts receive immutable caching, while Nginx
+  compresses eligible text responses and enforces connection/body timeouts.
 
 Please read [SECURITY.md](SECURITY.md) before reporting a vulnerability or
 deploying the gateway publicly.

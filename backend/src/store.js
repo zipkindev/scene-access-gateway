@@ -46,6 +46,7 @@ class PortalStore {
     this.hashKey = fs.readFileSync(this.hashKeyFile);
     if (this.hashKey.length !== 32) throw new Error('Invalid rate-limit key');
     if (!fs.existsSync(this.file)) this._write({ challenges: [], sessions: [], messages: [], handoffs: [], requests: [], attempts: [], blockedEmails: [], firewallBlockedEmails: [], decisionAudit: [], adminDecisionAudit: [] });
+    this.lastPurge = 0;
     this._transaction((state) => this._migrateRequests(state));
   }
 
@@ -75,6 +76,14 @@ class PortalStore {
       this._write(state);
       return result;
     } finally { fs.rmdirSync(this.lock); }
+  }
+
+  _read(callback) {
+    const state = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+    if (!state || !Array.isArray(state.challenges) || !Array.isArray(state.sessions)
+      || !Array.isArray(state.messages) || !Array.isArray(state.requests)
+      || !Array.isArray(state.attempts)) throw new Error('Invalid portal state');
+    return callback(state);
   }
 
   _migrateRequests(state) {
@@ -134,7 +143,9 @@ class PortalStore {
     return changed;
   }
 
-  purge(now = Date.now()) {
+  purge(now = Date.now(), force = false) {
+    if (!force && now - this.lastPurge < 60 * 1000) return false;
+    this.lastPurge = now;
     return this._transaction((state) => {
       state.challenges = state.challenges.filter((entry) => Date.parse(entry.expiresAt) > now);
       state.messages = state.messages.filter((entry) => Date.parse(entry.expiresAt) > now && !entry.usedAt);
@@ -153,7 +164,7 @@ class PortalStore {
   }
 
   getChallenge(token, browserHash) {
-    return this._transaction((state) => state.challenges.find((entry) => equalHash(entry.tokenHash, tokenHash(token)) && (browserHash === undefined || equalHash(entry.browserHash, browserHash))) || null);
+    return this._read((state) => state.challenges.find((entry) => equalHash(entry.tokenHash, tokenHash(token)) && (browserHash === undefined || equalHash(entry.browserHash, browserHash))) || null);
   }
 
   createMessage(challengeToken, identity, expiresAt) {
@@ -221,7 +232,7 @@ class PortalStore {
   }
 
   session(token, destinationId = 'torrentharbor') {
-    return this._transaction((state) => state.sessions.find((entry) => equalHash(entry.tokenHash, tokenHash(token)) && (entry.destinationId || 'torrentharbor') === destinationId && !entry.revokedAt && Date.parse(entry.expiresAt) > Date.now()) || null);
+    return this._read((state) => state.sessions.find((entry) => equalHash(entry.tokenHash, tokenHash(token)) && (entry.destinationId || 'torrentharbor') === destinationId && !entry.revokedAt && Date.parse(entry.expiresAt) > Date.now()) || null);
   }
 
   revokeSession(token) {
@@ -268,7 +279,7 @@ class PortalStore {
         after = decoded;
       } catch (_) { throw new Error('Invalid cursor'); }
     }
-    return this._transaction((state) => {
+    return this._read((state) => {
       const pendingCount = state.requests.filter((entry) => entry.destinationId === destinationId && entry.status === 'pending').length;
       let selected = state.requests.filter((entry) => entry.destinationId === destinationId && entry.status === status);
       if (status === 'blocked') {
@@ -287,7 +298,7 @@ class PortalStore {
 
   getRequest(id, destinationId) {
     if (!REQUEST_ID.test(id) || !DESTINATIONS.has(destinationId)) return null;
-    return this._transaction((state) => {
+    return this._read((state) => {
       const entry = state.requests.find((item) => item.id === id && item.destinationId === destinationId);
       return entry ? publicRequest(entry) : null;
     });

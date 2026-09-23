@@ -27,9 +27,17 @@ must also preserve the security-observability controls described in
 [`docs/security-monitoring.md`](../../docs/security-monitoring.md): JSON access
 records with both edge and upstream `X-Request-ID` values, restricted log
 retention, a per-source request zone, a concurrent-connection zone, explicit
-429 handling, body limits, and route-specific method restrictions. Confirm the
-TLS edge overwrites client-IP headers before using an address as a rate-limit
-or incident-response key.
+429 handling, normalized routes without tokens or queries, public management
+route denial, probe denials, compression, body/time limits, and route-specific
+method restrictions. Confirm the TLS edge overwrites client-IP headers before
+using an address as a rate-limit or incident-response key. Remove client-sent
+management trust headers and route trusted management calls over the private
+backend network.
+
+Keep new WAF rules in observation mode through the validation matrix, then
+enable high-confidence denials incrementally. Add HSTS at the TLS edge with a
+short initial lifetime; do not add `includeSubDomains` or `preload` until every
+covered hostname and certificate-renewal path has been reviewed.
 
 Telegram alerting is optional. When enabled, merge `compose.telegram.yaml`
 after reviewing the target's outbound network policy. The overlay attaches the

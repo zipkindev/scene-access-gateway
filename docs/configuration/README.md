@@ -48,6 +48,18 @@ City and ASN databases in `SAG_GEOIP_DIR` and use `compose.geoip.yaml` instead.
 See [security monitoring](../security-monitoring.md) for the trusted-proxy
 requirement, privacy limits, and public-exposure checklist.
 
+`SAG_MANAGEMENT_SOURCE_IP` identifies the direct TCP peer allowed to use the
+TorrentHarbor management API on the private backend network. Public Nginx
+denies that route and removes caller-supplied management source headers. Do not
+set this value to a shared public reverse proxy address or publish the backend
+port.
+
+Production TLS/WAF configuration must preserve normalized access logging,
+secret-probe and management-route denials, source-header replacement, request
+timeouts, compression, and rate limits. Keep new WAF policies in observation
+mode during representative validation. Configure HSTS at TLS termination with
+a short initial lifetime before considering broader coverage.
+
 ## Telegram security alerts
 
 Add `compose.telegram.yaml` to attach the backend to a separate egress-capable
