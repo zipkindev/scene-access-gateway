@@ -269,6 +269,62 @@ function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTele
     if (url.pathname === '/api/security/telegram' && request.method === 'GET') {
       return json(response, 200, telegramAlerts.state());
     }
+    if (url.pathname === '/api/security/telegram/setup/token' && request.method === 'POST') {
+      if (!csrf(request)) return csrfFailure(request, response);
+      try {
+        const body = await readJson(request);
+        if (Object.keys(body).sort().join(',') !== 'token') throw new Error('Invalid Telegram bot token');
+        const result = await telegramAlerts.configureToken(body.token);
+        securityEvents.record('admin_action', { request, pathname: url.pathname,
+          ip: sourceIp(request), identity: administrator.username,
+          outcome: 'success', reason: 'telegram_bot_configured', status: 200 });
+        return json(response, 200, result);
+      } catch (error) {
+        const message = ['Invalid Telegram bot token', 'Telegram rejected the request',
+          'Telegram API is unavailable', 'Telegram API returned an invalid response',
+          'Telegram did not return a valid bot identity'].includes(error.message)
+          ? error.message : 'Telegram bot configuration failed';
+        return json(response, message.startsWith('Invalid') ? 400 : 502, { error: message });
+      }
+    }
+    if (url.pathname === '/api/security/telegram/setup/chats' && request.method === 'POST') {
+      if (!csrf(request)) return csrfFailure(request, response);
+      try { return json(response, 200, await telegramAlerts.discoverChats()); }
+      catch (error) {
+        const message = error.message === 'Configure a Telegram bot token first' ? error.message
+          : error.message === 'Telegram API is unavailable' ? error.message : 'Telegram chat discovery failed';
+        return json(response, message.includes('first') ? 409 : 502, { error: message });
+      }
+    }
+    if (url.pathname === '/api/security/telegram/setup/chat' && request.method === 'POST') {
+      if (!csrf(request)) return csrfFailure(request, response);
+      try {
+        const body = await readJson(request);
+        if (Object.keys(body).sort().join(',') !== 'chatId') throw new Error('Invalid Telegram chat ID');
+        const result = await telegramAlerts.configureChat(body.chatId);
+        securityEvents.record('admin_action', { request, pathname: url.pathname,
+          ip: sourceIp(request), identity: administrator.username,
+          outcome: 'success', reason: 'telegram_destination_configured', status: 200 });
+        return json(response, 200, result);
+      } catch (error) {
+        const message = ['Invalid Telegram chat ID', 'Configure a Telegram bot token first',
+          'Telegram rejected the request', 'Telegram API is unavailable',
+          'Telegram did not return a valid destination'].includes(error.message)
+          ? error.message : 'Telegram destination configuration failed';
+        return json(response, message.startsWith('Invalid') ? 400
+          : message.includes('first') ? 409 : 502, { error: message });
+      }
+    }
+    if (url.pathname === '/api/security/telegram/setup' && request.method === 'DELETE') {
+      if (!csrf(request)) return csrfFailure(request, response);
+      try {
+        const result = telegramAlerts.disconnect();
+        securityEvents.record('admin_action', { request, pathname: url.pathname,
+          ip: sourceIp(request), identity: administrator.username,
+          outcome: 'success', reason: 'telegram_disconnected', status: 200 });
+        return json(response, 200, result);
+      } catch (_) { return json(response, 500, { error: 'Telegram integration could not be removed' }); }
+    }
     if (url.pathname === '/api/security/telegram' && request.method === 'PUT') {
       if (!csrf(request)) return csrfFailure(request, response);
       try {

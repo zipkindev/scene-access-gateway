@@ -24,10 +24,10 @@ before exposing a TLS gateway publicly.
 
 ## Optional Telegram alerts
 
-Add `compose.telegram.yaml` only after installing protected bot-token and
-numeric chat-ID files and reviewing outbound network policy. Telegram policy
-is managed in Scene Management; credentials are server-mounted secrets. See
-[security monitoring](../security-monitoring.md#telegram-critical-alerts).
+Add `compose.telegram.yaml` after reviewing outbound network policy. It adds
+only the egress-capable network; bot verification, chat discovery, destination
+selection, test delivery, and alert policy are completed in Scene Management.
+See [security monitoring](../security-monitoring.md#telegram-critical-alerts).
 
 ## Registry or air-gapped host
 

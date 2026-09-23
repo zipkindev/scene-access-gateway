@@ -47,21 +47,17 @@ requirement, privacy limits, and public-exposure checklist.
 
 ## Telegram security alerts
 
-Telegram delivery is optional and disabled without both protected files:
+Add `compose.telegram.yaml` to attach the backend to a separate egress-capable
+network, then complete onboarding in Scene Management → Security monitoring →
+Telegram alerts. An administrator pastes the BotFather token into a write-only
+field, verifies the bot, opens it in Telegram, sends a message, discovers the
+chat, connects it, and sends a labeled test. The token is stored mode `0600` in
+the protected persistent data volume and is never returned to the browser.
 
-- `SAG_TELEGRAM_BOT_TOKEN_FILE` contains the token issued by Telegram's
-  BotFather;
-- `SAG_TELEGRAM_CHAT_ID_FILE` contains the numeric destination chat ID.
-
-Do not place either value directly in `.env`. Set `.env` only to the local file
-paths, keep the files mode `0600`, and add `compose.telegram.yaml` to the
-Compose command. That overlay supplies the secret mounts and a separate
-egress-capable network. The base stack remains internal-only.
-
-After startup, Scene Management → Security monitoring → Telegram alerts shows
-only configured/active status. It controls enablement, severity, categories,
-aggregation, cooldowns, rate limits, UTC quiet hours, redaction, and labeled
-test delivery; it never exposes the token or chat ID.
+For headless deployments, `TELEGRAM_BOT_TOKEN_PATH` and
+`TELEGRAM_CHAT_ID_PATH` may still point to externally mounted files. UI-managed
+credentials take precedence and can be removed from Scene Management. Keep
+outbound policy restricted to Telegram's HTTPS API in production.
 
 The Platform root automatically combines Gateway and Wolf Compose files and
 optionally includes `.local/compose.override.yaml`. Keep environment-specific

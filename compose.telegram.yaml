@@ -1,20 +1,8 @@
 services:
   backend:
-    environment:
-      TELEGRAM_BOT_TOKEN_PATH: /run/secrets/telegram-bot-token
-      TELEGRAM_CHAT_ID_PATH: /run/secrets/telegram-chat-id
-    secrets:
-      - telegram-bot-token
-      - telegram-chat-id
     networks:
       - private
       - telegram-egress
-
-secrets:
-  telegram-bot-token:
-    file: ${SAG_TELEGRAM_BOT_TOKEN_FILE:?Set SAG_TELEGRAM_BOT_TOKEN_FILE to the protected bot-token file}
-  telegram-chat-id:
-    file: ${SAG_TELEGRAM_CHAT_ID_FILE:?Set SAG_TELEGRAM_CHAT_ID_FILE to the protected chat-ID file}
 
 networks:
   telegram-egress:
