@@ -29,8 +29,30 @@ else
 fi
 curl -fsS "http://127.0.0.1:$smoke_editor_port/" | grep -q '<title>Scene management</title>'
 curl -fsS "http://127.0.0.1:$smoke_editor_port/healthz" >/dev/null
-test "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$smoke_port/wp-login.php")" = 404
+probe_headers=$(curl -sS -D - -o /dev/null "http://127.0.0.1:$smoke_port/wp-login.php")
+probe_status=$(printf '%s\n' "$probe_headers" | awk 'NR == 1 { print $2 }')
+probe_request_id=$(printf '%s\n' "$probe_headers" | awk 'tolower($1) == "x-request-id:" { gsub("\\r", "", $2); print $2 }')
+test "$probe_status" = 404
+case "$probe_request_id" in
+  ????????-????-????-????-????????????) ;;
+  *) echo "probe response did not contain a request UUID" >&2; exit 1 ;;
+esac
 curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/summary" | grep -q '"retentionDays":'
-curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/events?limit=20" | grep -q 'automated_scanner_probe'
+security_events=$(curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/events?limit=20")
+printf '%s\n' "$security_events" | grep -q 'automated_scanner_probe'
+printf '%s\n' "$security_events" | grep -q '"status":404'
+printf '%s\n' "$security_events" | grep -q "\"requestId\":\"$probe_request_id\""
+frontend_logs=$(docker compose -p "$smoke_project" -f "$repository_root/compose.yaml" logs --no-color --no-log-prefix frontend)
+printf '%s\n' "$frontend_logs" | grep -q "\"backend_request_id\":\"$probe_request_id\""
+printf '%s\n' "$frontend_logs" | grep -q '"request_uri":"/wp-login.php"'
+
+rate_limited=false
+attempt=0
+while [ "$attempt" -lt 100 ]; do
+  status=$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$smoke_port/assets/rain-city-qr-embossed-v6.png")
+  if [ "$status" = 429 ]; then rate_limited=true; break; fi
+  attempt=$((attempt + 1))
+done
+test "$rate_limited" = true
 
 echo "local frontend, backend, artwork, editor, and security monitoring smoke tests passed"

@@ -11,11 +11,17 @@ const TYPES = new Set([
   'qr_verified', 'portal_session_created', 'access_request', 'rate_limited',
   'request_rejected', 'suspicious_request', 'admin_action',
 ]);
+const CATEGORIES = new Set([
+  'sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
+  'automated_scanner_probe', 'unexpected_http_method', 'invalid_content_length',
+  'rate_limiting', 'integrity_failure',
+]);
 const TOKEN = /\b[A-Za-z0-9_-]{43}\b/g;
 const SQL = /(?:\bunion\s+(?:all\s+)?select\b|\binformation_schema\b|\b(?:sleep|benchmark)\s*\(|\bwaitfor\s+delay\b|(?:'|%27)\s*(?:or|and)\s+['"%\d])/i;
 const TRAVERSAL = /(?:\.\.\/|\.\.\\|%2e%2e(?:%2f|%5c)|\/etc\/passwd|\/proc\/self)/i;
 const COMMAND = /(?:\$\(|`[^`]{0,120}`|(?:;|%3b|\||%7c)\s*(?:cat|curl|wget|sh|bash|nc|python|perl)\b)/i;
 const SCANNER = /(?:^|\/)(?:\.env|\.git|wp-admin|wp-login\.php|phpmyadmin|server-status|actuator|vendor\/phpunit)(?:\/|$)/i;
+const REQUEST_ID = /^[0-9a-f-]{36}$/;
 
 function safeDecode(value) {
   try { return decodeURIComponent(value); } catch (_) { return value; }
@@ -40,6 +46,37 @@ function classifyRequest(request, url) {
   if (!['GET', 'HEAD', 'POST'].includes(request.method || '')) findings.push({ category: 'unexpected_http_method', severity: 'warning' });
   if (String(request.headers['content-length'] || '').length > 12) findings.push({ category: 'invalid_content_length', severity: 'warning' });
   return findings;
+}
+
+function selected(value, allowed, label) {
+  const values = (Array.isArray(value) ? value : value ? [value] : []).map(String);
+  if (values.length > 16 || values.some((item) => !allowed.has(item))) throw new Error(`Invalid ${label} filter`);
+  return new Set(values);
+}
+
+function sourceBlockList(value) {
+  const values = (Array.isArray(value) ? value : value ? [value] : []).map(String);
+  if (values.length > 16) throw new Error('Invalid source filter');
+  const block = new net.BlockList();
+  for (const item of values) {
+    if (net.isIP(item)) {
+      block.addAddress(item, net.isIP(item) === 4 ? 'ipv4' : 'ipv6');
+      continue;
+    }
+    const match = /^(.+)\/(\d{1,3})$/.exec(item);
+    const version = match ? net.isIP(match[1]) : 0;
+    const prefix = match ? Number(match[2]) : -1;
+    if (!version || prefix < 0 || prefix > (version === 4 ? 32 : 128)) throw new Error('Invalid source filter');
+    block.addSubnet(match[1], prefix, version === 4 ? 'ipv4' : 'ipv6');
+  }
+  return { block, count: values.length };
+}
+
+function effectiveCategory(event) {
+  if (event.integrityValid === false) return 'integrity_failure';
+  if (CATEGORIES.has(event.category)) return event.category;
+  if (event.type === 'rate_limited') return 'rate_limiting';
+  return null;
 }
 
 class SecurityEvents {
@@ -122,7 +159,7 @@ class SecurityEvents {
         agentHash: this._hash(String(data.request.headers['user-agent'] || '').slice(0, 512)),
       } : null,
       identityHash: data.identity ? this._hash(String(data.identity).trim().toLowerCase()) : null,
-      requestId: /^[0-9a-f-]{36}$/.test(data.requestId || '') ? data.requestId : null,
+      requestId: REQUEST_ID.test(data.requestId || '') ? data.requestId : null,
       category: typeof data.category === 'string' ? data.category.slice(0, 80) : null,
     };
     const canonical = JSON.stringify(event);
@@ -150,17 +187,23 @@ class SecurityEvents {
     return () => this.listeners.delete(listener);
   }
 
-  recordRequestFindings(request, url) {
+  recordRequestFindings(request, url, status = null) {
     const ip = sourceIp(request);
     return classifyRequest(request, url).map((finding) => this.record('suspicious_request', {
-      ...finding, request, pathname: url.pathname, ip, outcome: 'observed', status: null,
+      ...finding, request, pathname: url.pathname, ip, outcome: 'observed',
+      status: Number.isInteger(status) ? status : null,
+      requestId: REQUEST_ID.test(request.securityRequestId || '') ? request.securityRequestId : null,
     }));
   }
 
   list(options = {}) {
     const limit = Math.min(250, Math.max(1, Number.parseInt(options.limit || '100', 10) || 100));
-    const severity = LEVELS.has(options.severity) ? options.severity : null;
-    const type = TYPES.has(options.type) ? options.type : null;
+    const severities = selected(options.severity, LEVELS, 'severity');
+    const types = selected(options.type, TYPES, 'event type');
+    const categories = selected(options.category, CATEGORIES, 'category');
+    const countries = selected(options.country, new Set((Array.isArray(options.country) ? options.country
+      : options.country ? [options.country] : []).filter((item) => /^[A-Z]{2}$/.test(item))), 'country');
+    const sources = sourceBlockList(options.source);
     const since = Number.isFinite(Date.parse(options.since || '')) ? Date.parse(options.since) : 0;
     const events = [];
     for (const name of this._files().reverse()) {
@@ -168,7 +211,7 @@ class SecurityEvents {
       for (const line of lines) {
         let event;
         try { event = JSON.parse(line); } catch (_) { continue; }
-        if (Date.parse(event.at) < since || (severity && event.severity !== severity) || (type && event.type !== type)) continue;
+        if (Date.parse(event.at) < since) continue;
         const integrity = event.integrity;
         const canonical = { ...event };
         delete canonical.integrity;
@@ -176,6 +219,19 @@ class SecurityEvents {
         const expected = Buffer.from(this._hash(JSON.stringify(canonical)));
         event.integrityValid = supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
         delete event.integrity;
+        if (event.source?.scope === 'public' && !event.source.country) {
+          const enriched = this.geoip.lookup(event.source.ip);
+          event.source = { ...event.source, ...Object.fromEntries(Object.entries(enriched)
+            .filter(([, value]) => value !== null && value !== undefined)) };
+        }
+        const category = effectiveCategory(event);
+        const sourceVersion = net.isIP(event.source?.ip);
+        if ((severities.size && !severities.has(event.severity))
+          || (types.size && !types.has(event.type))
+          || (categories.size && !categories.has(category))
+          || (countries.size && !countries.has(event.source?.country))
+          || (sources.count && (!sourceVersion || !sources.block.check(event.source.ip,
+            sourceVersion === 4 ? 'ipv4' : 'ipv6')))) continue;
         events.push(event);
         if (events.length >= limit) return events;
       }
@@ -197,7 +253,13 @@ class SecurityEvents {
       failedLogin: count((event) => event.type === 'qr_login_attempt' && event.outcome !== 'accepted'),
       accessRequests: count((event) => event.type === 'access_request'),
       uniquePublicIps: new Set(events.filter((event) => event.source?.scope === 'public').map((event) => event.source.ip)).size,
-      countries: [...countries].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([country, value]) => ({ country, count: value })),
+      countries: [...countries].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 8).map(([country, value]) => ({ country, count: value })),
+      filterOptions: {
+        severities: [...LEVELS], types: [...TYPES], categories: [...CATEGORIES],
+        countries: [...countries].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .map(([country, count]) => ({ country, count })),
+      },
       geoip: this.geoip.status(), retentionDays: this.retentionDays,
       storage: { bytes: this.totalBytes, maximumBytes: this.maxBytes, limited: this.storageLimited,
         suppressedSinceStart: this.suppressed },
@@ -205,4 +267,4 @@ class SecurityEvents {
   }
 }
 
-module.exports = { SecurityEvents, classifyRequest, safePath, sourceIp };
+module.exports = { CATEGORIES, LEVELS, TYPES, SecurityEvents, classifyRequest, effectiveCategory, safePath, sourceIp };

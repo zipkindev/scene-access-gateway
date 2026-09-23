@@ -28,9 +28,60 @@ own state, and detection never executes or stores a submitted payload.
 
 Each event contains the time, event category, result, normalized route,
 response status where known, source IP, a keyed user-agent fingerprint, and
-optional local geolocation. Email addresses and usernames are keyed hashes.
+optional local geolocation. Each proxied request receives an unspoofable UUID
+that is returned as `X-Request-ID`, stored with its application events, and
+included in the frontend's structured access record. Email addresses and
+usernames are keyed hashes.
 QR tokens, cookies, passwords, access tokens, request bodies, query strings,
 and full user-agent strings are never written to the security ledger.
+
+The frontend writes JSON access records to standard output. These contain the
+exact request target, full user agent, source address, response status, timing,
+Nginx edge request ID, and backend request ID. Treat these records as protected
+security data: the exact target may contain a QR token or a query value. Apply
+bounded retention and restricted access in the container logging driver or
+central log platform. Do not paste unredacted access records into tickets or
+chat.
+
+## Alert investigation
+
+Use the ledger as the alert index and the frontend access log as request
+evidence. Preserve both before restarting or recreating containers because the
+ledger is persistent but the container log may not be.
+
+1. Record the alert window in UTC, category, source address, normalized path,
+   response status, and request ID from Scene Management.
+2. Search the frontend JSON access log for the same `backend_request_id`. This
+   returns the exact `request_uri`, edge status, timing, and user agent.
+3. Group surrounding records by `remote_addr`, user agent, method, target, and
+   status. Compare their times with Authentik, TLS-edge, firewall, and upstream
+   application logs.
+4. Look for evidence of effect: successful authentication, a new session,
+   changed state, unexpected upstream traffic, a 2xx/3xx response from a
+   sensitive route, or follow-on requests that require authorization. A probe
+   signature by itself is not evidence of successful exploitation.
+5. Preserve a redacted incident record containing counts and hashes; retain the
+   raw evidence only in the restricted log system.
+
+For a Compose deployment, capture the raw frontend log without Compose's line
+prefix and protect the resulting file immediately:
+
+```sh
+umask 077
+frontend_container=$(docker compose ps -q frontend)
+docker logs --since 24h "$frontend_container" > frontend-access.jsonl 2> frontend-error.log
+```
+
+Search by the UUID shown in Scene Management:
+
+```sh
+jq --arg id 'REQUEST-UUID' 'select(.backend_request_id == $id)' frontend-access.jsonl
+```
+
+Older events created before request correlation was added have no request ID.
+For those, correlate on UTC time, source address, method, normalized `uri`, and
+status, allowing for a small clock difference. Never send the captured files
+off-host unless an approved incident-response process requires it.
 
 ## Client IP trust boundary
 
@@ -62,6 +113,20 @@ and ASN databases, then place them in the protected directory configured by
 .local/geoip/GeoLite2-ASN.mmdb
 ```
 
+For repeatable updates, create a free MaxMind account and license key, then
+store the account ID and key in the ignored files
+`.local/secrets/maxmind-account-id` and
+`.local/secrets/maxmind-license-key`. Restrict both files to the deployment
+owner and run:
+
+```sh
+./scripts/update-geoip.sh
+```
+
+The updater reads credentials from files so it does not place them in command
+arguments or tracked configuration. Alternate protected paths can be selected
+with `SAG_MAXMIND_ACCOUNT_ID_FILE` and `SAG_MAXMIND_LICENSE_KEY_FILE`.
+
 Launch the optional overlay:
 
 ```sh
@@ -71,6 +136,28 @@ docker compose -f compose.yaml -f compose.geoip.yaml up -d --build
 GeoLite data must be kept current under MaxMind's license. Geolocation is
 approximate. Country, region, city, ASN, and accuracy radius are investigation
 hints—not proof of a person's identity or physical address.
+
+Scene Management displays that approximate location beside each public source
+IP. Events written before the databases were mounted are enriched at read time,
+without rewriting the integrity-protected ledger. Private and loopback sources
+are identified by scope and are never sent to a lookup service.
+
+## Event filters
+
+The controls directly above the event list can be combined:
+
+- select one or more severity tokens;
+- add one or more event types or Telegram-compatible alert categories;
+- add countries discovered in the current 24-hour summary;
+- enter an exact IPv4/IPv6 address or a CIDR range; and
+- click an IP address or country in an event to add it immediately.
+
+Selecting several values of the same kind matches any of those values. Filters
+of different kinds are combined, so `Warning` plus `Lithuania` plus
+`45.118.10.0/24` requires all three conditions. Click any active filter chip to
+remove it, or use **Clear filters** to reset the event list. Filtering happens
+on the authenticated backend; the browser receives at most 250 matching
+events.
 
 ## Retention and privacy
 
@@ -144,6 +231,13 @@ For an internet-facing deployment, also collect the TLS proxy's structured
 access/error logs and consider a reviewed WAF or CrowdSec-style remediation
 layer. Introduce automatic blocking only after observing false positives;
 dashboard classifications in this project are intentionally non-blocking.
+
+The portable public listener applies a deliberately conservative per-source
+ceiling of 10 requests per second with a burst of 40 and 20 concurrent
+connections. A production TLS proxy that replaces the portable Nginx
+configuration must define equivalent limits itself. Baseline legitimate
+traffic before lowering these values. Rate-limited edge requests return 429
+and appear in the access log but do not reach the application ledger.
 
 ## Initial public-exposure checklist
 

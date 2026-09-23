@@ -41,6 +41,9 @@ Application security events are retained for 30 days by default. Set
 IPs without sending them to a third party, place current licensed
 GeoLite2 City and ASN databases in the protected `SAG_GEOIP_DIR` and add
 `compose.geoip.yaml` to the Compose command.
+`scripts/update-geoip.sh` can maintain both files from a MaxMind account ID and
+license key stored in ignored local secret files; it never embeds those values
+in an image or public configuration.
 
 See [security monitoring](../security-monitoring.md) for the trusted-proxy
 requirement, privacy limits, and public-exposure checklist.

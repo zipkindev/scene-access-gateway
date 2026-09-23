@@ -138,14 +138,20 @@ function readJson(req) { return new Promise((resolve, reject) => { let body = ''
 function issueAssertion(session) { if (!assertionIssuer) assertionIssuer = new AssertionIssuer(); return assertionIssuer.issue(session); }
 async function deliver(to, token) { if (!mailer) mailer = createMailer(loadSmtpConfig()); return mailer.sendMail({ from: loadSmtpConfig().from, to, subject: 'Confirm access', text: `Open this link to confirm access:\n${ORIGIN}/verify/${token}\n\nThis link expires in 15 minutes.` }); }
 function security(type, req, url, data = {}) {
-  try { return securityEvents.record(type, { request: req, pathname: url?.pathname || req.url, ip: ip(req), ...data }); }
+  try { return securityEvents.record(type, { request: req, pathname: url?.pathname || req.url,
+    ip: ip(req), requestId: req.securityRequestId, ...data }); }
   catch (error) { console.error(JSON.stringify({ event: 'security_event_write_failed', type, error: error.code || error.name || 'Error' })); return null; }
 }
 
 const server = http.createServer(async (req, res) => {
+  req.securityRequestId = crypto.randomUUID();
+  res.setHeader('X-Request-ID', req.securityRequestId);
   store.purge(); const url = new URL(req.url, ORIGIN);
-  try { securityEvents.recordRequestFindings(req, url); }
-  catch (error) { console.error(JSON.stringify({ event: 'security_event_write_failed', type: 'suspicious_request', error: error.code || error.name || 'Error' })); }
+  const securityUrl = new URL(url);
+  res.once('finish', () => {
+    try { securityEvents.recordRequestFindings(req, securityUrl, res.statusCode); }
+    catch (error) { console.error(JSON.stringify({ event: 'security_event_write_failed', type: 'suspicious_request', error: error.code || error.name || 'Error' })); }
+  });
   if (url.pathname === '/healthz') return send(res, ['GET', 'HEAD'].includes(req.method) ? 200 : 405, { 'Content-Type': 'text/plain' }, req.method === 'HEAD' ? '' : 'ok\n');
   if (url.pathname === '/wolf3d' && ['GET', 'HEAD'].includes(req.method)) return send(res, 308, { Location: '/wolf3d/' }, '');
   const wolfPath = url.pathname === '/wolf3d/' ? '/wolf3d/index.html' : url.pathname;
@@ -260,7 +266,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname.startsWith('/login/') && ['GET', 'POST'].includes(req.method)) {
     const token = url.pathname.slice(7);
-    const requestId = req.method === 'POST' ? newLoginRequestId() : null;
+    const requestId = req.method === 'POST' ? req.securityRequestId || newLoginRequestId() : null;
     const record = (destination, outcome, smtpError) => {
       logLoginOutcome(requestId, destination, outcome, smtpError);
       const delivery = outcome.startsWith('smtp_');

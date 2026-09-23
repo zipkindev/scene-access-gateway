@@ -14,6 +14,8 @@ The intended interface is:
 - `fetch-scene-assets.sh`: use verified local audio when configured, otherwise
   build the public profile without optional third-party audio;
 - `import-audio.sh`: verify and install all eight locally licensed audio files;
+- `update-geoip.sh`: download current GeoLite2 City and ASN databases using
+  protected MaxMind credential files;
 - `export-images.sh` / `load-images.sh`: support air-gapped hosts;
 - `up.sh` / `down.sh`: wrap ordinary Compose lifecycle operations;
 - `sync-branch.sh`: rebase, test, and safely push an already committed branch.
