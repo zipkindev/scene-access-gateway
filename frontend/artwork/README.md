@@ -27,5 +27,17 @@ The repository preserves these categories:
 - `motion/`: versioned motion bundles and their layer images;
 - `audio/`: the optional-audio manifest and source register; raw MP3s stay
   local and ignored;
-- `attribution/`: source and license records.
+- `attribution/`: source and license records;
 - `source-manifests/`: retained source and scene-bundle manifests.
+
+## Asset pipeline
+
+Tracked artwork is verified against `manifest.json`, copied into the backend
+build context by `scripts/prepare-workspace-assets.sh`, and served through the
+scene asset APIs. Production uploads and optimized derivatives live in runtime
+state rather than this source tree.
+
+From the Gateway repository root, run `./scripts/verify-build-inputs.sh` after
+changing a manifest or asset. Run `./scripts/package-scene-assets.sh` when
+reviewing the deterministic public asset bundle. Never add a file whose origin
+or redistribution terms are unresolved.

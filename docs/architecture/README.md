@@ -16,6 +16,25 @@ production topology and optional GPL game code outside the core image. The
 main repository is independently buildable; cross-repository CI also verifies
 the read-only Wolf extension overlay against it.
 
+## Repository and runtime topology
+
+```mermaid
+flowchart TB
+    Platform[Scene Access Platform] -->|pins and tests| GatewayRepo[Gateway repository]
+    Platform -->|pins and tests| WolfRepo[Wolf extension repository]
+    GatewayRepo --> Frontend[Nginx frontend/gateway]
+    GatewayRepo --> Backend[Node.js backend]
+    WolfRepo -. read-only runtime and controller mounts .-> Backend
+    Frontend -->|private network| Backend
+    Backend --> State[(Protected persistent state)]
+    Backend --> Identity[Authentik and SMTP]
+    Local[(Local secrets, media, game data, host policy)] -. runtime mounts .-> Platform
+```
+
+The Platform repository coordinates versions and Compose lifecycle. It does
+not copy Gateway source. Gateway stays independently buildable when the Wolf
+overlay is absent.
+
 ## Why the boundaries exist
 
 | Component | Purpose | Trust boundary |

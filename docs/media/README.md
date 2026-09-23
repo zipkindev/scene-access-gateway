@@ -13,3 +13,13 @@ the repository's real frontend and backend containers.
 The temporary QR pointed to `localhost` and its backing volume was destroyed
 after capture. No production hostname, token, account, email address, visitor
 IP, or internal service address is included in these files.
+
+## Documentation rules
+
+Capture replacements only from disposable local state. Before committing,
+inspect every visible field and image frame for hostnames, identities, tokens,
+QR destinations, internal addresses, and browser history. Use RFC-reserved
+addresses for demonstrations and describe any capture-only overlays.
+
+Product screenshots belong here; reusable portal artwork belongs under
+`frontend/artwork/` with its separate provenance and licensing record.

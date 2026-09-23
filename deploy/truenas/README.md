@@ -25,3 +25,11 @@ active-session gates.
 Normal Git pulls and rebases leave `.local/` untouched, so core application
 updates can be tested with the same private deployment overlay without merging
 environment values into public source.
+
+## Deployment gate
+
+There is intentionally no generic “deploy to TrueNAS” script. Before a real
+cutover, review the exact target, image tags or digests, mounts, networks,
+backups, rollback procedure, health checks, and active-session handling. A
+local build, smoke test, Git push, or successful CI run does not authorize the
+deployment; explicit approval is required for the reviewed procedure.

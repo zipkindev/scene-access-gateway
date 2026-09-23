@@ -4,10 +4,17 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Deployment: Docker Compose](https://img.shields.io/badge/deployment-Docker%20Compose-2496ED.svg)](docs/deployment/README.md)
 [![Identity: Authentik](https://img.shields.io/badge/identity-Authentik-fd4b2d.svg)](authentik/README.md)
+[![Platform](https://img.shields.io/badge/platform-Scene%20Access%20Platform-0f766e.svg)](https://github.com/zipkindev/scene-access-platform)
 
 A self-hosted, scene-driven access portal that combines an interactive visual
 gateway, a browser-based scene editor, destination-specific access workflows,
 and Authentik identity management in a portable Docker Compose stack.
+
+For the complete tested Gateway + Wolf3D/Spear workspace, start with
+[Scene Access Platform](https://github.com/zipkindev/scene-access-platform).
+This repository remains the independently buildable core application and the
+correct place to develop portal, backend, Scene Management, identity, artwork,
+and security-monitoring features.
 
 ![Scene Access Gateway interactive Future table artwork](frontend/artwork/interactive/future-minesweeper-v1/base.png)
 
@@ -118,6 +125,10 @@ deployment configuration rather than the application image.
 
 More detail is available in the [architecture notes](docs/architecture/README.md).
 
+The public Platform repository pins a tested Gateway commit together with a
+tested optional Wolf extension commit. It does not copy this repository's
+source or absorb its Apache-2.0 history.
+
 ## How an access handoff works
 
 A handoff carries an approval from the visitor's phone back to the browser
@@ -178,6 +189,17 @@ approval and forwards only the authorized request.
 
 ### Build and run
 
+For the complete supported workspace:
+
+```sh
+git clone --recurse-submodules https://github.com/zipkindev/scene-access-platform.git
+cd scene-access-platform
+./scripts/test.sh
+./scripts/up.sh
+```
+
+For standalone Gateway development:
+
 ```sh
 git clone https://github.com/zipkindev/scene-access-gateway.git
 cd scene-access-gateway
@@ -219,10 +241,14 @@ must never be committed.
 ## Optional Wolf3D/Spear extension
 
 The game integration is deliberately maintained in a separate GPL-3.0
-repository. With both repositories checked out beside one another:
+repository. The recommended setup is the Platform workspace above, where
+`gateway/` and `wolf3d/` are pinned submodules and the root scripts assemble
+their Compose files.
+
+Component contributors can also combine standalone checkouts:
 
 ```sh
-git clone https://github.com/zipkindev/scene-access-gateway-wolf3d.git
+git clone https://github.com/zipkindev/scene-access-gateway-wolf3d.git ../scene-access-gateway-wolf3d
 export SAG_WOLF3D_EXTENSION_DIR="$(cd ../scene-access-gateway-wolf3d && pwd)"
 
 docker compose \

@@ -7,6 +7,17 @@ The base `compose.yaml` starts only the frontend and backend. It uses a named
 volume for portal state and does not require credentials merely to display the
 local portal and editor.
 
+## Configuration ownership
+
+| Input | Location | Public? |
+| --- | --- | --- |
+| Safe defaults and variable names | `.env.example` | Yes |
+| Local environment values | `.env` | No; ignored |
+| Generated secret files | `.local/secrets/` | No; ignored |
+| Host, proxy, TLS, storage, and network overrides | `.local/` Compose overlays | No; ignored |
+| Runtime scene and security state | `portal_data` volume | No |
+| Licensed optional media and GeoIP databases | Protected local directories | No |
+
 To add the local Authentik/PostgreSQL stack:
 
 ```sh
@@ -33,3 +44,8 @@ GeoLite2 City and ASN databases in the protected `SAG_GEOIP_DIR` and add
 
 See [security monitoring](../security-monitoring.md) for the trusted-proxy
 requirement, privacy limits, and public-exposure checklist.
+
+The Platform root automatically combines Gateway and Wolf Compose files and
+optionally includes `.local/compose.override.yaml`. Keep environment-specific
+values in these runtime inputs rather than rebuilding public images for each
+host.
