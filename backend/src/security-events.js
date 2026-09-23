@@ -239,6 +239,15 @@ class SecurityEvents {
     return events;
   }
 
+  filterOptions(options = {}) {
+    const matchingTypes = this.list({ ...options, type: [], limit: 250 });
+    const matchingCategories = this.list({ ...options, category: [], limit: 250 });
+    return {
+      types: [...new Set(matchingTypes.map((event) => event.type))].sort(),
+      categories: [...new Set(matchingCategories.map(effectiveCategory).filter(Boolean))].sort(),
+    };
+  }
+
   summary(now = Date.now()) {
     const events = this.list({ limit: 250, since: new Date(now - 24 * 60 * 60 * 1000).toISOString() });
     const count = (predicate) => events.filter(predicate).length;

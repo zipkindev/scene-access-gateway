@@ -76,6 +76,9 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(client, /Filter by this IP/);
   assert.match(client, /Filter by this country/);
   assert.match(client, /accuracyRadiusKm/);
+  assert.match(client, /administrator activity/);
+  assert.match(client, /Scene Management/);
+  assert.match(client, /GeoIP databases updated/);
 });
 
 test('security events persist bounded structured metadata and hash identities', () => temporary((directory) => {
@@ -125,6 +128,12 @@ test('security event filters compose across severity, category, country, exact I
   const summary = events.summary();
   assert.deepEqual(summary.filterOptions.countries, [{ country: 'LT', count: 1 }, { country: 'US', count: 1 }]);
   assert.ok(summary.filterOptions.categories.includes('automated_scanner_probe'));
+  assert.deepEqual(events.filterOptions({ severity: ['warning'] }), {
+    types: ['suspicious_request'], categories: ['automated_scanner_probe'],
+  });
+  assert.deepEqual(events.filterOptions({ type: ['portal_visit'] }), {
+    types: ['portal_visit', 'suspicious_request'], categories: [],
+  });
 }));
 
 test('authenticated Scene Management exposes summary and redacted events', async () => {
@@ -139,6 +148,7 @@ test('authenticated Scene Management exposes summary and redacted events', async
     assert.equal(response.status, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.events.length, 1);
+    assert.deepEqual(body.filterOptions, { types: ['access_request'], categories: [] });
     assert.doesNotMatch(JSON.stringify(body), /private@example\.com/);
     const summary = JSON.parse((await invoke(handler, '/api/security/summary', { 'x-scene-admin': 'owner' })).body);
     assert.equal(summary.accessRequests, 1);

@@ -175,7 +175,13 @@ of different kinds are combined, so `Warning` plus `Lithuania` plus
 `45.118.10.0/24` requires all three conditions. Click any active filter chip to
 remove it, or use **Clear filters** to reset the event list. Filtering happens
 on the authenticated backend; the browser receives at most 250 matching
-events.
+events. The event-type and alert-type menus are faceted: they hide values that
+cannot match the other active filters and omit values already selected.
+
+Authenticated configuration changes are labeled as **Administrator activity**
+from **Scene Management**, with a readable action such as a MaxMind database
+update or Telegram policy change. They are not displayed as unknown network
+sources.
 
 ## Retention and privacy
 
