@@ -913,6 +913,25 @@ function readableSecurityValue(value) {
   return String(value).replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+const adminActionLabels = {
+  maxmind_configured: 'MaxMind account connected',
+  maxmind_databases_updated: 'GeoIP databases updated',
+  maxmind_disconnected: 'MaxMind account removed',
+  telegram_bot_configured: 'Telegram bot connected',
+  telegram_destination_configured: 'Telegram destination connected',
+  telegram_disconnected: 'Telegram integration disconnected',
+  telegram_policy_updated: 'Telegram alert policy updated',
+  telegram_test_requested: 'Telegram test alert sent',
+  access_request_approve: 'Access request approved',
+  access_request_block: 'Access request blocked',
+  access_request_unblock: 'Access request unblocked',
+  access_request_dismiss: 'Access request dismissed',
+};
+
+function adminActionLabel(reason) {
+  return adminActionLabels[reason] || (reason ? readableSecurityValue(reason) : 'Administrative change completed');
+}
+
 const securityToolbar = elements.securitySeverity.closest('.security-toolbar');
 const severityField = elements.securitySeverity.closest('.field');
 const securityQuickFilters = document.createElement('div');
@@ -1043,8 +1062,11 @@ securityClear.addEventListener('click', () => {
 });
 renderSecurityFilters();
 
-function fillSecurityOptions(select, values, label) {
-  select.replaceChildren(new Option('Choose…', ''), ...values.map((value) => new Option(label(value), value)));
+function fillSecurityOptions(select, values, label, kind, emptyLabel = 'No matching options') {
+  const available = values.filter((value) => !securityFilters[kind].has(value));
+  select.replaceChildren(new Option(available.length ? 'Choose…' : emptyLabel, ''),
+    ...available.map((value) => new Option(label(value), value)));
+  select.disabled = !available.length;
 }
 
 function appendSecuritySource(detail, source) {
@@ -1368,12 +1390,14 @@ async function loadSecurity() {
     if (!summaryResponse.ok || !eventsResponse.ok) throw new Error('Security monitoring is unavailable');
     const summary = await summaryResponse.json();
     const result = await eventsResponse.json();
-    const options = summary.filterOptions || { types: [], categories: [], countries: [] };
-    fillSecurityOptions(securityTypeAdd, options.types || [], readableSecurityValue);
-    fillSecurityOptions(securityCategoryAdd, options.categories || [], readableSecurityValue);
-    const countries = (options.countries || []).map((item) => item.country);
+    const options = result.filterOptions || { types: [], categories: [] };
+    fillSecurityOptions(securityTypeAdd, options.types || [], readableSecurityValue, 'type',
+      'No matching event types');
+    fillSecurityOptions(securityCategoryAdd, options.categories || [], readableSecurityValue, 'category',
+      'No matching alert types');
+    const countries = (summary.filterOptions?.countries || []).map((item) => item.country);
     fillSecurityOptions(securityCountryAdd, countries,
-      (value) => countryName(value) + ' (' + value + ')');
+      (value) => countryName(value) + ' (' + value + ')', 'country', 'No detected countries');
     await Promise.all([loadTelegram(), loadMaxMind()]);
     elements.securitySummary.replaceChildren(
       securityMetric(summary.total, 'events · 24 hours'),
@@ -1388,12 +1412,16 @@ async function loadSecurity() {
       const row = document.createElement('div');
       row.className = 'security-event ' + (event.integrityValid === false ? 'critical' : event.severity);
       const heading = document.createElement('strong');
-      heading.textContent = event.type.replaceAll('_', ' ') + ' · '
+      heading.textContent = (event.type === 'admin_action' ? 'administrator activity' : event.type.replaceAll('_', ' ')) + ' · '
         + (event.integrityValid === false ? 'integrity check failed' : event.severity);
       const detail = document.createElement('div');
       detail.append(new Date(event.at).toLocaleString());
-      appendSecuritySource(detail, event.source);
-      if (event.outcome) detail.append(' · ' + event.outcome);
+      if (event.type === 'admin_action') {
+        detail.append(' · Scene Management · ' + adminActionLabel(event.reason));
+      } else {
+        appendSecuritySource(detail, event.source);
+        if (event.outcome) detail.append(' · ' + event.outcome);
+      }
       if (event.category) detail.append(' · ' + readableSecurityValue(event.category));
       if (event.http?.path) detail.append(' · ' + event.http.method + ' ' + event.http.path
         + (event.http.status !== null ? ' → ' + event.http.status : ''));

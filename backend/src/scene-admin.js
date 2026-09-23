@@ -271,12 +271,16 @@ function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTele
         return json(response, 400, { error: 'Invalid security-event query' });
       }
       try {
-        return json(response, 200, { events: securityEvents.list({
+        const filters = {
           limit: url.searchParams.get('limit'), since: url.searchParams.get('since'),
           severity: url.searchParams.getAll('severity'), type: url.searchParams.getAll('type'),
           category: url.searchParams.getAll('category'), country: url.searchParams.getAll('country'),
           source: url.searchParams.getAll('source'),
-        }) });
+        };
+        return json(response, 200, {
+          events: securityEvents.list(filters),
+          filterOptions: securityEvents.filterOptions(filters),
+        });
       } catch (_) { return json(response, 400, { error: 'Invalid security-event query' }); }
     }
     if (url.pathname === '/api/security/maxmind' && request.method === 'GET') {
