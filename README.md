@@ -120,39 +120,41 @@ More detail is available in the [architecture notes](docs/architecture/README.md
 
 ## How an access handoff works
 
-```mermaid
-sequenceDiagram
-    actor Display as Display browser
-    actor Phone as Visitor phone
-    participant Edge as Nginx gateway
-    participant Portal as Portal backend
-    participant IdP as Authentik
-    participant Mail as SMTP
-    participant App as Internal service
+A handoff carries an approval from the visitor's phone back to the browser
+showing the scene. The private application opens on that display, not on the
+phone.
 
-    Display->>Edge: Open scene
-    Edge->>Portal: Create short-lived browser-bound challenge
-    Display->>Portal: Ordered scene interactions
-    Portal-->>Display: Reveal QR only after the trigger completes
-    Phone->>Edge: Open QR login URL
-    Phone->>Portal: Submit username or email
-    Portal->>IdP: Exact identity and destination-group lookup
-    Portal->>Mail: Send one-time confirmation link
-    Phone->>Portal: Confirm link
-    Display->>Portal: Poll challenge status
-    Portal-->>Display: Host-scoped session cookie
-    Display->>Edge: Request protected destination
-    Edge->>Portal: Internal session check
-    Portal-->>Edge: Signed, short-lived identity assertion
-    Edge->>App: Relay only the approved request
-```
+**Display → QR code → phone → confirmation email → display → private application**
 
-Known destination members receive an automated one-time email confirmation.
-Unknown visitors can submit an access request, which enters a durable
-destination-specific review queue in Scene Management. Firewall enrollment has
-an additional owner-confirmation step before group membership is granted.
-Public clients never receive internal API credentials, upstream addresses, or
-the portal signing key.
+### If the visitor already has access
+
+1. The visitor selects a private application on the display. After the scene's
+   configured interaction finishes, a QR code appears.
+2. The visitor scans the code with their phone and enters their username or
+   email address.
+3. The gateway checks that the account is allowed to use the selected
+   application. It sends a one-time link to the email address already recorded
+   for that account.
+4. The visitor opens the email link. This approves the waiting display; it does
+   not open the private application on the phone.
+5. The display notices the approval and opens only the selected application.
+
+### If the visitor does not have access yet
+
+The visitor can submit an access request for that specific application. The
+request waits in Scene Management for an owner to review. Submitting the
+request does not grant access. After an owner approves it and grants the
+required membership, the visitor starts again with a new QR code.
+
+Firewall access also requires a separate, one-time owner confirmation before
+membership is granted.
+
+### What stays private
+
+The QR code, email link and browser approval are short-lived and limited to the
+selected application. Public browsers never receive internal API credentials,
+private service addresses or the portal signing key. The gateway checks the
+approval and forwards only the authorized request.
 
 ## Repository layout
 
