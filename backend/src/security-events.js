@@ -60,6 +60,7 @@ class SecurityEvents {
     this.totalBytes = 0;
     this.storageLimited = false;
     this.buckets = new Map();
+    this.listeners = new Set();
     this.suppressed = 0;
     this.cleanup();
   }
@@ -137,7 +138,16 @@ class SecurityEvents {
     console.log(JSON.stringify({ event: 'security_event', id: event.id, type, severity,
       outcome: event.outcome, category: event.category }));
     this.cleanup();
+    for (const listener of this.listeners) {
+      try { listener({ ...event, integrityValid: true }); } catch (_) { /* alert delivery is isolated */ }
+    }
     return event;
+  }
+
+  subscribe(listener) {
+    if (typeof listener !== 'function') throw new Error('Invalid security event listener');
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   recordRequestFindings(request, url) {

@@ -22,6 +22,13 @@ files in the protected directory configured by `SAG_GEOIP_DIR`. The backend
 performs local lookups only. Review [security monitoring](../security-monitoring.md)
 before exposing a TLS gateway publicly.
 
+## Optional Telegram alerts
+
+Add `compose.telegram.yaml` only after installing protected bot-token and
+numeric chat-ID files and reviewing outbound network policy. Telegram policy
+is managed in Scene Management; credentials are server-mounted secrets. See
+[security monitoring](../security-monitoring.md#telegram-critical-alerts).
+
 ## Registry or air-gapped host
 
 Images use `${SAG_IMAGE_NAMESPACE}/{frontend,backend}:${SAG_IMAGE_TAG}`. A

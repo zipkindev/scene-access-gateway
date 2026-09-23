@@ -22,6 +22,12 @@ configuration. A real cutover must separately define reviewed published ports,
 networks, volumes, health checks, certificate paths, backups, rollback, and
 active-session gates.
 
+Telegram alerting is optional. When enabled, merge `compose.telegram.yaml`
+and provide the two protected files named by `SAG_TELEGRAM_BOT_TOKEN_FILE` and
+`SAG_TELEGRAM_CHAT_ID_FILE`. Review the target's outbound network policy before
+attaching the backend to an egress-capable network. Scene Management controls
+the alert policy but never accepts or returns either secret.
+
 Normal Git pulls and rebases leave `.local/` untouched, so core application
 updates can be tested with the same private deployment overlay without merging
 environment values into public source.
