@@ -1,5 +1,10 @@
 # Deployment modes
 
+For a complete installation, use
+[Scene Access Platform](https://github.com/zipkindev/scene-access-platform).
+It pins compatible Gateway and Wolf commits and wraps the combined Compose
+lifecycle. The modes below describe how the Gateway component is delivered.
+
 ## Portable Compose
 
 Build with `scripts/build.sh`, review `.env`, and start with `scripts/up.sh`.
@@ -30,3 +35,7 @@ Use the public example under `deploy/truenas/` to create an ignored local
 Compose override. Real hostnames, addresses, TLS paths, authentication files,
 storage mappings, and network policy remain local. A guarded TrueNAS cutover
 remains separate from source synchronization.
+
+No deployment mode changes source-control ownership: images remain portable,
+while secrets, hostnames, certificates, storage, and network policy are mounted
+or supplied by the target environment.

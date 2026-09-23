@@ -1,10 +1,10 @@
 # Deployment
 
-The target deployment contract is standard Docker Compose. The base stack will
-remain host-neutral; TrueNAS-specific paths, VLAN identities, and guarded
+The deployment contract is standard Docker Compose. The base stack remains
+host-neutral; TrueNAS-specific paths, VLAN identities, and guarded
 release procedures belong in `truenas/` overrides.
 
-Planned deployment modes:
+Supported delivery patterns are:
 
 - local development;
 - ordinary Docker Compose with locally built images;
@@ -12,3 +12,11 @@ Planned deployment modes:
 - air-gapped image export/load;
 - guarded TrueNAS deployment.
 
+Use [Scene Access Platform](https://github.com/zipkindev/scene-access-platform)
+for the tested Gateway + Wolf composition. See the full
+[deployment guide](../docs/deployment/README.md) for image naming, offline
+transfer, identity, GeoIP, and configuration boundaries.
+
+Tracked files define reusable examples only. Real addresses, storage paths,
+certificates, credentials, and network policy remain in ignored local files or
+the target platform's secret/configuration system.
