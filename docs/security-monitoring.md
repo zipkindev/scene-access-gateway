@@ -103,10 +103,24 @@ replace it.
 
 ## Offline GeoIP enrichment
 
-GeoIP is disabled unless local MaxMind DB files are mounted. No visitor IP is
-sent to an external lookup service. Obtain and maintain licensed GeoLite2 City
-and ASN databases, then place them in the protected directory configured by
-`SAG_GEOIP_DIR`:
+No visitor IP is sent to an external lookup service. Scene Management can use a
+MaxMind account ID and license key to download GeoLite2 City and ASN databases
+into the protected persistent state volume. Add the outbound download overlay
+when starting the stack:
+
+```sh
+docker compose -f compose.yaml -f compose.maxmind.yaml up -d --build
+```
+
+Open **Security monitoring → IP geolocation · MaxMind GeoLite2**, enter the
+account ID and license key, then select **Connect and download**. Both databases
+must download and validate before credentials are saved. The account ID is
+masked afterward and the license key is never returned to the browser. Use
+**Update databases** for future releases. **Remove saved account** deletes the
+credentials while leaving the last validated databases active.
+
+The older host-managed workflow remains available for deployments that require
+read-only database mounts. Place licensed files in `SAG_GEOIP_DIR`:
 
 ```text
 .local/geoip/GeoLite2-City.mmdb
@@ -127,7 +141,7 @@ The updater reads credentials from files so it does not place them in command
 arguments or tracked configuration. Alternate protected paths can be selected
 with `SAG_MAXMIND_ACCOUNT_ID_FILE` and `SAG_MAXMIND_LICENSE_KEY_FILE`.
 
-Launch the optional overlay:
+Launch the mount overlay instead of UI-managed setup:
 
 ```sh
 docker compose -f compose.yaml -f compose.geoip.yaml up -d --build
@@ -136,6 +150,10 @@ docker compose -f compose.yaml -f compose.geoip.yaml up -d --build
 GeoLite data must be kept current under MaxMind's license. Geolocation is
 approximate. Country, region, city, ASN, and accuracy radius are investigation
 hints—not proof of a person's identity or physical address.
+
+When `compose.geoip.yaml` supplies mounted database paths, Scene Management
+reports mounted-file mode and disables credential changes. The UI-managed and
+mounted-file modes are intentionally mutually exclusive.
 
 Scene Management displays that approximate location beside each public source
 IP. Events written before the databases were mounted are enriched at read time,

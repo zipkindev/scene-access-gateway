@@ -38,12 +38,12 @@ database exports, or active portal state in tracked configuration.
 Application security events are retained for 30 days by default. Set
 `SAG_SECURITY_EVENT_RETENTION_DAYS` to a value from 1 through 365.
 `SAG_SECURITY_EVENT_MAX_BYTES` defaults to 67108864 (64 MiB). To enrich source
-IPs without sending them to a third party, place current licensed
-GeoLite2 City and ASN databases in the protected `SAG_GEOIP_DIR` and add
-`compose.geoip.yaml` to the Compose command.
-`scripts/update-geoip.sh` can maintain both files from a MaxMind account ID and
-license key stored in ignored local secret files; it never embeds those values
-in an image or public configuration.
+IPs without sending them to a third party, add `compose.maxmind.yaml` and
+connect a MaxMind account from Scene Management. Credentials and downloaded
+databases stay in the protected persistent state volume and are never embedded
+in an image. For host-managed installations, place current licensed GeoLite2
+City and ASN databases in `SAG_GEOIP_DIR` and use `compose.geoip.yaml` instead.
+`scripts/update-geoip.sh` remains available for headless database maintenance.
 
 See [security monitoring](../security-monitoring.md) for the trusted-proxy
 requirement, privacy limits, and public-exposure checklist.

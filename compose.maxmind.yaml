@@ -1,0 +1,8 @@
+services:
+  backend:
+    networks:
+      - private
+      - maxmind-egress
+
+networks:
+  maxmind-egress:

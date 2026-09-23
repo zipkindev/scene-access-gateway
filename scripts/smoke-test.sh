@@ -28,6 +28,7 @@ else
   test "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$smoke_port/audio-samples/freesound_community-calm-loop-80576.mp3")" = 404
 fi
 curl -fsS "http://127.0.0.1:$smoke_editor_port/" | grep -q '<title>Scene management</title>'
+curl -fsS "http://127.0.0.1:$smoke_editor_port/admin.js" | grep -q 'MaxMind GeoLite2'
 curl -fsS "http://127.0.0.1:$smoke_editor_port/healthz" >/dev/null
 probe_headers=$(curl -sS -D - -o /dev/null "http://127.0.0.1:$smoke_port/wp-login.php")
 probe_status=$(printf '%s\n' "$probe_headers" | awk 'NR == 1 { print $2 }')
@@ -38,6 +39,7 @@ case "$probe_request_id" in
   *) echo "probe response did not contain a request UUID" >&2; exit 1 ;;
 esac
 curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/summary" | grep -q '"retentionDays":'
+curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/maxmind" | grep -q '"mode":"scene-management"'
 security_events=$(curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/events?limit=20")
 printf '%s\n' "$security_events" | grep -q 'automated_scanner_probe'
 printf '%s\n' "$security_events" | grep -q '"status":404'

@@ -1073,6 +1073,122 @@ function appendSecuritySource(detail, source) {
   addText([source.asn ? 'AS' + source.asn : null, source.organization].filter(Boolean).join(' '));
 }
 
+function maxMindField(labelText, input) {
+  const label = document.createElement('label');
+  label.className = 'field';
+  label.append(labelText, input);
+  return label;
+}
+
+const maxMindSection = document.createElement('section');
+maxMindSection.className = 'telegram-settings';
+maxMindSection.setAttribute('aria-labelledby', 'maxmindTitle');
+const maxMindTitle = document.createElement('h3');
+maxMindTitle.id = 'maxmindTitle';
+maxMindTitle.textContent = 'IP geolocation · MaxMind GeoLite2';
+const maxMindDescription = document.createElement('p');
+maxMindDescription.textContent = 'Connect a MaxMind account to download City and ASN databases into protected server storage. Visitor IPs are looked up locally and are never sent to MaxMind. Credentials are write-only and never returned to the browser.';
+const maxMindGrid = document.createElement('div');
+maxMindGrid.className = 'telegram-grid';
+const maxMindAccountId = document.createElement('input');
+maxMindAccountId.inputMode = 'numeric';
+maxMindAccountId.autocomplete = 'off';
+maxMindAccountId.spellcheck = false;
+maxMindAccountId.placeholder = 'Numeric MaxMind account ID';
+const maxMindLicenseKey = document.createElement('input');
+maxMindLicenseKey.type = 'password';
+maxMindLicenseKey.autocomplete = 'new-password';
+maxMindLicenseKey.spellcheck = false;
+maxMindLicenseKey.placeholder = 'MaxMind license key';
+maxMindGrid.append(maxMindField('Account ID', maxMindAccountId), maxMindField('License key', maxMindLicenseKey));
+const maxMindActions = document.createElement('div');
+maxMindActions.className = 'telegram-actions';
+const maxMindConnect = document.createElement('button');
+maxMindConnect.type = 'button';
+maxMindConnect.textContent = 'Connect and download';
+const maxMindUpdate = document.createElement('button');
+maxMindUpdate.type = 'button';
+maxMindUpdate.textContent = 'Update databases';
+const maxMindDisconnect = document.createElement('button');
+maxMindDisconnect.type = 'button';
+maxMindDisconnect.textContent = 'Remove saved account';
+maxMindActions.append(maxMindConnect, maxMindUpdate, maxMindDisconnect);
+const maxMindStatus = document.createElement('p');
+maxMindStatus.className = 'security-note';
+maxMindStatus.setAttribute('role', 'status');
+maxMindStatus.textContent = 'Checking GeoIP configuration…';
+maxMindSection.append(maxMindTitle, maxMindDescription, maxMindGrid, maxMindActions, maxMindStatus);
+elements.telegramToken.closest('.telegram-settings').before(maxMindSection);
+
+let maxMindState = null;
+function showMaxMind(result) {
+  maxMindState = result;
+  const city = result.database?.city || {};
+  const asn = result.database?.asn || {};
+  const date = (value) => value ? new Date(value).toLocaleString() : 'not installed';
+  maxMindStatus.textContent = result.mode === 'mounted-files'
+    ? 'GeoIP is managed by mounted server files · City: ' + date(city.updatedAt) + ' · ASN: ' + date(asn.updatedAt)
+    : (result.configured ? 'Connected account ' + result.accountHint : 'No MaxMind account connected')
+      + ' · City: ' + date(city.updatedAt) + ' · ASN: ' + date(asn.updatedAt);
+  const mounted = result.mode === 'mounted-files';
+  maxMindAccountId.disabled = mounted;
+  maxMindLicenseKey.disabled = mounted;
+  maxMindConnect.disabled = mounted;
+  maxMindUpdate.disabled = mounted || !result.configured;
+  maxMindDisconnect.disabled = mounted || !result.configured;
+}
+
+async function loadMaxMind() {
+  const response = await fetch('/api/security/maxmind', { cache: 'no-store' });
+  if (!response.ok) throw new Error('MaxMind settings are unavailable');
+  showMaxMind(await response.json());
+}
+
+async function maxMindRequest(pathname, method, body) {
+  const response = await fetch(pathname, { method,
+    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), 'X-Scene-CSRF': requireCsrf() },
+    body: body ? JSON.stringify(body) : undefined });
+  const result = await readWriteResponse(response);
+  if (!response.ok) throw new Error(result.error || 'MaxMind request failed');
+  showMaxMind(result);
+  return result;
+}
+
+maxMindConnect.addEventListener('click', async () => {
+  const accountId = maxMindAccountId.value.trim();
+  const licenseKey = maxMindLicenseKey.value.trim();
+  if (!accountId || !licenseKey) return void (maxMindStatus.textContent = 'Enter the account ID and license key.');
+  maxMindConnect.disabled = true;
+  maxMindStatus.textContent = 'Verifying account and downloading City and ASN databases…';
+  try {
+    await maxMindRequest('/api/security/maxmind/setup', 'POST', { accountId, licenseKey });
+    maxMindAccountId.value = '';
+    maxMindLicenseKey.value = '';
+    maxMindStatus.textContent += ' · local lookups are active';
+    await loadSecurity();
+  } catch (error) { maxMindStatus.textContent = error.message; }
+  finally { if (maxMindState) showMaxMind(maxMindState); else maxMindConnect.disabled = false; }
+});
+
+maxMindUpdate.addEventListener('click', async () => {
+  maxMindUpdate.disabled = true;
+  maxMindStatus.textContent = 'Downloading current City and ASN databases…';
+  try {
+    await maxMindRequest('/api/security/maxmind/update', 'POST');
+    await loadSecurity();
+  } catch (error) { maxMindStatus.textContent = error.message; }
+  finally { if (maxMindState) showMaxMind(maxMindState); else maxMindUpdate.disabled = false; }
+});
+
+maxMindDisconnect.addEventListener('click', async () => {
+  maxMindDisconnect.disabled = true;
+  try {
+    await maxMindRequest('/api/security/maxmind/setup', 'DELETE');
+    maxMindStatus.textContent += ' · installed databases remain active';
+  } catch (error) { maxMindStatus.textContent = error.message; }
+  finally { if (maxMindState) showMaxMind(maxMindState); else maxMindDisconnect.disabled = false; }
+});
+
 const telegramCategories = [...document.querySelectorAll('[data-telegram-category]')];
 
 function showTelegram(result) {
@@ -1258,7 +1374,7 @@ async function loadSecurity() {
     const countries = (options.countries || []).map((item) => item.country);
     fillSecurityOptions(securityCountryAdd, countries,
       (value) => countryName(value) + ' (' + value + ')');
-    await loadTelegram();
+    await Promise.all([loadTelegram(), loadMaxMind()]);
     elements.securitySummary.replaceChildren(
       securityMetric(summary.total, 'events · 24 hours'),
       securityMetric(summary.uniquePublicIps, 'public source IPs'),
