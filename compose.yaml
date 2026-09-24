@@ -76,7 +76,8 @@ services:
       - /tmp
     volumes:
       - portal_data:/var/lib/scene-access-gateway
-      - ./.local/secrets/source-intelligence-token:/run/secrets/source-intelligence-token:ro
+    secrets:
+      - source-intelligence-token
     cap_drop:
       - ALL
     security_opt:
@@ -104,8 +105,8 @@ services:
       PROTECTED_DESTINATION_IP: ${SAG_SECURITY_MAP_DESTINATION_IP:-}
       SOURCE_INTELLIGENCE_WORKER_TOKEN_PATH: /run/secrets/source-intelligence-token
     read_only: true
-    volumes:
-      - ./.local/secrets/source-intelligence-token:/run/secrets/source-intelligence-token:ro
+    secrets:
+      - source-intelligence-token
     tmpfs:
       - /tmp
     cap_drop:
@@ -129,6 +130,10 @@ services:
 
 volumes:
   portal_data:
+
+secrets:
+  source-intelligence-token:
+    file: ./.local/secrets/source-intelligence-token
 
 networks:
   ingress:

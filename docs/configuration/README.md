@@ -8,6 +8,8 @@ source-intelligence worker. It uses a named volume for portal state and does
 not require external credentials merely to display the local portal and
 editor. The worker is unexposed, uses a dedicated authentication secret, and
 keeps active investigation disabled by default.
+Portable Compose presents the mode-`0600` host file as a read-only Compose
+secret so host and container user IDs do not need to match.
 
 ## Configuration ownership
 
