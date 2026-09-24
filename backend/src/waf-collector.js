@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
@@ -22,6 +23,13 @@ function safePath(uri) {
   let pathname = '/';
   try { pathname = new URL(String(uri || '/'), 'https://waf.invalid').pathname; } catch (_) { pathname = '/'; }
   return pathname.slice(0, 512).replace(/\b[A-Za-z0-9_-]{32,}\b/g, ':token').replace(/[\r\n]/g, '');
+}
+
+function safeTransactionId(value) {
+  const raw = String(value || '').slice(0, 512);
+  if (!raw) return null;
+  if (/^[A-Za-z0-9_-]{1,128}$/.test(raw)) return raw;
+  return crypto.createHash('sha256').update(raw).digest('base64url').slice(0, 43);
 }
 
 function messageCategory(message) {
@@ -67,13 +75,13 @@ function normalizeAudit(value, observedAt = new Date(), historical = false) {
     ? new Date(transaction.time_stamp).toISOString() : observedAt.toISOString();
   const ruleIds = [...new Set(actionable.map((message) => String(message?.details?.ruleId || ''))
     .filter((rule) => /^\d{1,10}$/.test(rule)))];
-  const uniqueId = String(transaction.unique_id || '').slice(0, 128);
+  const uniqueId = safeTransactionId(transaction.unique_id);
   return {
-    version: 1, source: 'waf', transactionId: uniqueId || null, at,
+    version: 1, source: 'waf', transactionId: uniqueId, at,
     severity, category, outcome: disposition, sourceIp,
     http: { method: String(request.method || '').slice(0, 12), path: safePath(request.uri), status },
     edge: { target, disposition, ruleIds, anomalyScore: scores.length ? Math.max(...scores) : null,
-      interrupted, transactionId: uniqueId || null, historical: historical === true },
+      interrupted, transactionId: uniqueId, historical: historical === true },
   };
 }
 
@@ -161,4 +169,4 @@ if (require.main === module) {
   process.once('SIGINT', shutdown);
 }
 
-module.exports = { WafCollector, messageCategory, normalizeAudit, safePath };
+module.exports = { WafCollector, messageCategory, normalizeAudit, safePath, safeTransactionId };

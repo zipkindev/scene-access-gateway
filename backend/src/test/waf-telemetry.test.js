@@ -5,12 +5,20 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { WafCollector, normalizeAudit } = require('../waf-collector');
+const { WafCollector, normalizeAudit, safeTransactionId } = require('../waf-collector');
 
 test('standalone collector keeps its polling timer referenced', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'waf-collector.js'), 'utf8');
   assert.match(source, /collector\.start\(\{ unref: false \}\)/);
   assert.match(source, /options\.unref !== false/);
+});
+
+test('ModSecurity transaction IDs are retained or converted to stable ledger-safe IDs', () => {
+  assert.equal(safeTransactionId('edge_request-01'), 'edge_request-01');
+  const converted = safeTransactionId('transaction.with:modsecurity/characters');
+  assert.match(converted, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(converted, safeTransactionId('transaction.with:modsecurity/characters'));
+  assert.notEqual(converted, 'transaction.with:modsecurity/characters');
 });
 const { WafIngestor } = require('../waf-ingestor');
 const { SecurityEvents } = require('../security-events');
