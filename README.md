@@ -160,6 +160,16 @@ records are correlated by source, target, and category; duplicate events are
 aggregated and sustained incidents can produce bounded reminders according to
 the Scene Management policy.
 
+Finding severity is derived from the matched CRS rule severity and
+high-confidence attack category, not from the origin response code. In the UI
+and Telegram, `Observed only (DetectionOnly; not blocked)` means the WAF logged
+the request and forwarded it. An origin `2xx` shows only that the routed HTTP
+request received a success-class response; it does not establish that the
+scanner authenticated, reached an administrative function, or exploited the
+application. Normalized findings include a safe CRS rule explanation plus the
+sanitized method, path, status, action, and WAF mode without retaining request
+headers, query values, or bodies.
+
 Start an internet-facing rollout with `MODSEC_RULE_ENGINE=DetectionOnly` and
 retain application/origin enforcement. Use a one-week observation window to
 compare WAF findings with origin outcomes, rate limits, and known legitimate

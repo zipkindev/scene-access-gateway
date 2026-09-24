@@ -83,7 +83,7 @@ class WafIngestor {
             if (this.ids.has(identity)) continue;
             const recorded = this.securityEvents.record('waf_finding', { at: event.at, ip: event.sourceIp,
               severity: event.severity, category: event.category, outcome: event.outcome,
-              http: event.http, edge: event.edge });
+              http: event.http, edge: { ...event.edge, mode: this.mode } });
             if (!recorded) { rejected += 1; continue; }
             this.ids.add(identity);
             ingested += 1;

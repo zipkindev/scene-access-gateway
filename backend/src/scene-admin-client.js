@@ -913,6 +913,32 @@ function readableSecurityValue(value) {
   return String(value).replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function wafDispositionLabel(disposition, mode = null) {
+  const labels = {
+    observed_passed: mode === 'DetectionOnly'
+      ? 'Observed only (DetectionOnly; not blocked)'
+      : 'Observed only (not blocked by WAF)',
+    origin_rejected: 'Observed; origin rejected the request',
+    origin_rate_limited: 'Observed; origin rate-limited the request',
+    waf_blocked: 'Blocked by WAF before the origin',
+    edge_rejected: 'Rejected at the edge',
+    outcome_unknown: 'Outcome could not be determined',
+  };
+  return labels[disposition] || readableSecurityValue(disposition);
+}
+
+function wafOutcomeMeaning(event) {
+  if (event.edge?.disposition === 'observed_passed') {
+    return event.http?.status !== null
+      ? `Origin returned HTTP ${event.http.status}; status alone does not prove access or exploitation`
+      : 'The WAF did not block this request; that alone does not prove access or exploitation';
+  }
+  if (event.edge?.disposition === 'origin_rejected') return 'The origin rejected the request';
+  if (event.edge?.disposition === 'origin_rate_limited') return 'The origin rate-limited the request';
+  if (event.edge?.disposition === 'waf_blocked') return 'The request did not reach the origin';
+  return null;
+}
+
 const adminActionLabels = {
   maxmind_configured: 'MaxMind account connected',
   maxmind_databases_updated: 'GeoIP databases updated',
@@ -1316,7 +1342,7 @@ function showTelegram(result) {
     const detail = document.createElement('div');
     detail.textContent = incident.source + ' · target ' + incident.target + ' · last seen '
       + new Date(incident.lastSeenAt).toLocaleString() + ' · '
-      + Object.entries(incident.dispositions).map(([name, count]) => readableSecurityValue(name) + ' ' + count).join(' · ');
+      + Object.entries(incident.dispositions).map(([name, count]) => wafDispositionLabel(name) + ' ' + count).join(' · ');
     row.append(heading, detail);
     return row;
   });
@@ -1487,7 +1513,7 @@ async function loadSecurity() {
       securityMetric(summary.critical, 'critical signals'),
       securityMetric(summary.integrityFailures, 'integrity failures'),
       securityMetric(summary.waf?.total || 0, 'WAF findings'),
-      securityMetric(summary.waf?.passed || 0, 'WAF observed and passed'),
+      securityMetric(summary.waf?.passed || 0, 'WAF observed, not blocked'),
       securityMetric(summary.waf?.rejected || 0, 'origin or edge rejected'),
       securityMetric(summary.waf?.rateLimited || 0, 'origin rate limited'),
       securityMetric(summary.waf?.blocked || 0, 'WAF blocked'),
@@ -1504,16 +1530,19 @@ async function loadSecurity() {
         detail.append(' · Scene Management · ' + adminActionLabel(event.reason));
       } else {
         appendSecuritySource(detail, event.source);
-        if (event.outcome) detail.append(' · ' + event.outcome);
+        if (event.outcome && event.type !== 'waf_finding') detail.append(' · ' + event.outcome);
       }
       if (event.category) detail.append(' · ' + readableSecurityValue(event.category));
       if (event.http?.path) detail.append(' · ' + event.http.method + ' ' + event.http.path
         + (event.http.status !== null ? ' → ' + event.http.status : ''));
       if (event.edge) detail.append(' · target ' + (event.edge.target || 'unknown')
-        + ' · ' + readableSecurityValue(event.edge.disposition)
-        + (event.edge.ruleIds?.length ? ' · CRS ' + event.edge.ruleIds.join(', ') : '')
+        + ' · ' + wafDispositionLabel(event.edge.disposition, event.edge.mode)
+        + (event.edge.ruleIds?.length ? ' · matched CRS ' + event.edge.ruleIds.join(', ') : '')
+        + (event.edge.ruleSummary ? ' · ' + event.edge.ruleSummary : '')
         + (event.edge.anomalyScore !== null ? ' · score ' + event.edge.anomalyScore : '')
         + (event.edge.historical ? ' · historical import' : ''));
+      const meaning = event.type === 'waf_finding' ? wafOutcomeMeaning(event) : null;
+      if (meaning) detail.append(' · ' + meaning);
       if (event.requestId) detail.append(' · request ' + event.requestId);
       row.append(heading, detail);
       return row;

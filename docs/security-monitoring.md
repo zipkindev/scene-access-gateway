@@ -215,8 +215,16 @@ cooldowns and a global hourly ceiling, choose UTC quiet hours with an optional
 critical override, select a redaction level, and send a labeled test alert.
 
 When WAF telemetry is configured, Scene Management also displays normalized
-CRS findings and whether each request passed, was rejected or rate limited by
-the origin, or was blocked at the edge. Telegram incidents are keyed by source
+CRS findings and whether each request was observed but not blocked, was rejected or rate limited by
+the origin, or was blocked at the edge. `Observed only (DetectionOnly; not
+blocked)` describes the WAF action, not a successful intrusion. An origin HTTP
+`2xx` confirms only that the routed request received a success-class response;
+it does not prove authentication, administrative access, or exploitation.
+Severity comes from the matched CRS rule and detection confidence rather than
+the origin status. Cards and Telegram alerts include the sanitized request,
+origin status, CRS IDs, safe rule descriptions, and a plain-English action and
+meaning. Raw headers, query values, bodies, cookies, and authorization data
+remain excluded. Telegram incidents are keyed by source
 fingerprint, target, and attack category. The first qualifying event alerts
 immediately, duplicates accumulate, and ongoing activity re-alerts at the
 configured persistence interval even when the origin continues returning

@@ -120,6 +120,40 @@ function maskedSource(source, redaction) {
   return [masked, location, network].filter(Boolean).join(' · ');
 }
 
+function dispositionLabel(disposition) {
+  return ({
+    observed_passed: 'observed only, not blocked',
+    origin_rejected: 'origin rejected',
+    origin_rate_limited: 'origin rate-limited',
+    waf_blocked: 'WAF blocked',
+    edge_rejected: 'edge rejected',
+    outcome_unknown: 'outcome unknown',
+  })[disposition] || String(disposition).replaceAll('_', ' ');
+}
+
+function wafAction(event) {
+  const disposition = event.edge?.disposition;
+  if (disposition === 'observed_passed') return event.edge?.mode === 'DetectionOnly'
+    ? 'Observed only (DetectionOnly); request was not blocked'
+    : 'Observed only; request was not blocked by the WAF';
+  if (disposition === 'origin_rejected') return 'Observed by WAF; origin rejected the request';
+  if (disposition === 'origin_rate_limited') return 'Observed by WAF; origin rate-limited the request';
+  if (disposition === 'waf_blocked') return 'Blocked by WAF before reaching the origin';
+  if (disposition === 'edge_rejected') return 'Rejected at the edge';
+  return 'Outcome could not be determined';
+}
+
+function wafMeaning(event) {
+  const disposition = event.edge?.disposition;
+  if (disposition === 'observed_passed') return event.http?.status !== null
+    ? `Origin returned HTTP ${event.http.status}; this status alone does not prove access or exploitation.`
+    : 'The request was not blocked; that alone does not prove access or exploitation.';
+  if (disposition === 'origin_rejected') return 'The application or origin rejected the request.';
+  if (disposition === 'origin_rate_limited') return 'The application or origin applied rate limiting.';
+  if (disposition === 'waf_blocked') return 'The request did not reach the application origin.';
+  return null;
+}
+
 class TelegramAlerts {
   constructor(directory, options = {}) {
     this.directory = path.join(directory, 'scene-management');
@@ -338,7 +372,14 @@ class TelegramAlerts {
     }
     const source = maskedSource(event.source, this.policy.redaction);
     const dispositionSummary = Object.entries(incident.dispositions)
-      .map(([name, count]) => `${name.replaceAll('_', ' ')} ${count}`).join(' · ');
+      .map(([name, count]) => `${dispositionLabel(name)} ${count}`).join(' · ');
+    const waf = event.type === 'waf_finding' && event.edge;
+    const request = waf && event.http?.path
+      ? `Request: ${String(event.http.method || '').slice(0, 12)} ${String(event.http.path).slice(0, 512)}`
+        + (event.http.status !== null ? ` → HTTP ${event.http.status}` : '') : null;
+    const matched = waf && event.edge.ruleIds?.length
+      ? `Matched: CRS ${event.edge.ruleIds.join(', ')}`
+        + (event.edge.ruleSummary ? ` · ${event.edge.ruleSummary}` : '') : null;
     const text = [
       'Scene Access security alert',
       `${String(event.severity || 'warning').toUpperCase()} · ${category.replaceAll('_', ' ')}`,
@@ -346,8 +387,11 @@ class TelegramAlerts {
       `Time: ${event.at || now.toISOString()}`,
       `Source: ${source}`,
       `Target: ${target}`,
-      dispositionSummary ? `Results: ${dispositionSummary}` : null,
-      event.outcome ? `Outcome: ${String(event.outcome).slice(0, 80)}` : null,
+      request,
+      matched,
+      waf ? `WAF action: ${wafAction(event)}` : dispositionSummary ? `Results: ${dispositionSummary}` : null,
+      waf ? `Incident results: ${dispositionSummary}` : null,
+      waf ? `Meaning: ${wafMeaning(event)}` : event.outcome ? `Outcome: ${String(event.outcome).slice(0, 80)}` : null,
     ].filter(Boolean).join('\n').slice(0, 3500);
     this.queue.push({ id: crypto.randomUUID(), text, createdAt: now.toISOString(), test: false });
     if (this.queue.length > 100) this.queue.splice(0, this.queue.length - 100);

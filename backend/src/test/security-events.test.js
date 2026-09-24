@@ -110,7 +110,27 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(client, /administrator activity/);
   assert.match(client, /Scene Management/);
   assert.match(client, /GeoIP databases updated/);
+  assert.match(client, /WAF observed, not blocked/);
+  assert.match(client, /status alone does not prove access or exploitation/);
+  assert.match(client, /Observed only \(DetectionOnly; not blocked\)/);
 });
+
+test('stored WAF protocol findings are re-ranked for presentation without rewriting the ledger', () => temporary((directory) => {
+  const events = new SecurityEvents(directory, noGeo);
+  const written = events.record('waf_finding', { ip: '203.0.113.8', severity: 'critical',
+    category: 'framework_admin_probe', outcome: 'observed_passed',
+    http: { method: 'GET', path: '/', status: 200 }, edge: {
+      target: '75.178.84.162', disposition: 'observed_passed', ruleIds: ['920350'], mode: 'DetectionOnly',
+    } });
+  assert.equal(written.severity, 'critical');
+  const stored = fs.readFileSync(path.join(directory, 'security-events', written.at.slice(0, 10) + '.jsonl'), 'utf8');
+  const listed = events.list({ type: 'waf_finding' });
+  assert.equal(listed[0].integrityValid, true);
+  assert.equal(listed[0].severity, 'warning');
+  assert.equal(listed[0].category, 'protocol_anomaly');
+  assert.equal(listed[0].edge.ruleSummary, 'Numeric IP used as the HTTP Host header');
+  assert.equal(fs.readFileSync(path.join(directory, 'security-events', written.at.slice(0, 10) + '.jsonl'), 'utf8'), stored);
+}));
 
 test('security events persist bounded structured metadata and hash identities', () => temporary((directory) => {
   const events = new SecurityEvents(directory, noGeo, { retentionDays: 7 });

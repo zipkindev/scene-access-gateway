@@ -4,13 +4,9 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
+const { findingCategory, findingSeverity, messageCategory, ruleSummary } = require('./waf-rules');
 
 const CORRELATION_RULES = new Set(['949110', '980130']);
-const CATEGORY_PRIORITY = [
-  'command_injection_probe', 'sql_injection_probe', 'path_traversal_probe',
-  'sensitive_file_enumeration', 'backup_file_probe', 'known_scanner',
-  'framework_admin_probe', 'protocol_anomaly', 'automated_scanner_probe',
-];
 
 function atomicJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -32,30 +28,13 @@ function safeTransactionId(value) {
   return crypto.createHash('sha256').update(raw).digest('base64url').slice(0, 43);
 }
 
-function messageCategory(message) {
-  const details = message?.details || {};
-  const rule = String(details.ruleId || '');
-  const tags = Array.isArray(details.tags) ? details.tags.map((value) => String(value).toLowerCase()) : [];
-  const text = String(message?.message || '').toLowerCase();
-  if (rule === '930130' || text.includes('restricted file access')) return 'sensitive_file_enumeration';
-  if (rule === '930140' || rule === '920500' || text.includes('backup or working file')) return 'backup_file_probe';
-  if (rule === '913100' || text.includes('security scanner')) return 'known_scanner';
-  if (tags.some((tag) => tag.includes('attack-sqli'))) return 'sql_injection_probe';
-  if (tags.some((tag) => tag.includes('attack-rce') || tag.includes('attack-command'))) return 'command_injection_probe';
-  if (tags.some((tag) => tag.includes('attack-lfi') || tag.includes('attack-rfi'))) return 'path_traversal_probe';
-  if (tags.some((tag) => tag.includes('platform-') || tag.includes('language-'))) return 'framework_admin_probe';
-  if (rule.startsWith('920') || text.includes('header') || text.includes('protocol')) return 'protocol_anomaly';
-  return 'automated_scanner_probe';
-}
-
 function normalizeAudit(value, observedAt = new Date(), historical = false) {
   const transaction = value?.transaction;
   if (!transaction || typeof transaction !== 'object') return null;
   const messages = Array.isArray(transaction.messages) ? transaction.messages : [];
   const actionable = messages.filter((message) => !CORRELATION_RULES.has(String(message?.details?.ruleId || '')));
   if (!actionable.length) return null;
-  const categories = new Set(actionable.map(messageCategory));
-  const category = CATEGORY_PRIORITY.find((candidate) => categories.has(candidate)) || 'automated_scanner_probe';
+  const category = findingCategory(actionable);
   const request = transaction.request && typeof transaction.request === 'object' ? transaction.request : {};
   const response = transaction.response && typeof transaction.response === 'object' ? transaction.response : {};
   const status = Number.isInteger(response.http_code) ? response.http_code : null;
@@ -64,9 +43,7 @@ function normalizeAudit(value, observedAt = new Date(), historical = false) {
     : status === 429 ? 'origin_rate_limited'
       : status >= 400 && status < 500 ? 'origin_rejected'
         : status >= 200 && status < 400 ? 'observed_passed' : 'outcome_unknown';
-  const severe = new Set(['command_injection_probe', 'sql_injection_probe', 'path_traversal_probe', 'sensitive_file_enumeration']);
-  const severity = severe.has(category) || (status >= 200 && status < 400 && category !== 'protocol_anomaly')
-    ? 'critical' : category === 'protocol_anomaly' ? 'info' : 'warning';
+  const severity = findingSeverity(actionable, category);
   const scores = messages.map((message) => /Total Score:\s*(\d+)/i.exec(String(message?.message || '')))
     .filter(Boolean).map((match) => Number(match[1])).filter(Number.isInteger);
   const sourceIp = net.isIP(transaction.client_ip) ? transaction.client_ip : 'unknown';
@@ -80,7 +57,7 @@ function normalizeAudit(value, observedAt = new Date(), historical = false) {
     version: 1, source: 'waf', transactionId: uniqueId, at,
     severity, category, outcome: disposition, sourceIp,
     http: { method: String(request.method || '').slice(0, 12), path: safePath(request.uri), status },
-    edge: { target, disposition, ruleIds, anomalyScore: scores.length ? Math.max(...scores) : null,
+    edge: { target, disposition, ruleIds, ruleSummary: ruleSummary(ruleIds), anomalyScore: scores.length ? Math.max(...scores) : null,
       interrupted, transactionId: uniqueId, historical: historical === true },
   };
 }

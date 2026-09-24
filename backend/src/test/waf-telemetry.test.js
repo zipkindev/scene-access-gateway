@@ -49,8 +49,34 @@ test('WAF audits normalize into one sanitized high-confidence finding', () => {
   assert.equal(value.http.status, 404);
   assert.equal(value.edge.disposition, 'origin_rejected');
   assert.deepEqual(value.edge.ruleIds, ['930130']);
+  assert.equal(value.edge.ruleSummary, 'Restricted or sensitive file requested');
   assert.equal(value.edge.anomalyScore, 5);
   assert.doesNotMatch(JSON.stringify(value), /do-not-retain/);
+});
+
+test('CRS protocol rules retain their own severity and are not promoted by an HTTP 200', () => {
+  const numericHost = normalizeAudit(audit({
+    request: { hostname: '75.178.84.162', method: 'GET', uri: '/' },
+    response: { http_code: 200 },
+    messages: [{ message: 'Host header is a numeric IP address', details: {
+      ruleId: '920350', severity: '4', tags: ['platform-multi'],
+    } }],
+  }));
+  assert.equal(numericHost.category, 'protocol_anomaly');
+  assert.equal(numericHost.severity, 'warning');
+  assert.equal(numericHost.edge.disposition, 'observed_passed');
+  assert.equal(numericHost.edge.ruleSummary, 'Numeric IP used as the HTTP Host header');
+
+  const restrictedHeader = normalizeAudit(audit({
+    request: { hostname: '75.178.84.162', method: 'POST', uri: '/wp-json/batch/v1' },
+    response: { http_code: 200 },
+    messages: [{ message: 'HTTP header is restricted by policy', details: {
+      ruleId: '920451', severity: '2', tags: ['platform-multi', 'language-multi'],
+    } }],
+  }));
+  assert.equal(restrictedHeader.category, 'protocol_anomaly');
+  assert.equal(restrictedHeader.severity, 'critical');
+  assert.equal(restrictedHeader.edge.ruleSummary, 'HTTP header restricted by policy');
 });
 
 test('collector and ingestor persist, deduplicate, and expose WAF status', () => {
@@ -77,6 +103,7 @@ test('collector and ingestor persist, deduplicate, and expose WAF status', () =>
     assert.equal(events[0].edge.target, 'access.example.invalid');
     assert.equal(events[0].edge.transactionId, 'edge_request_01');
     assert.equal(events[0].edge.historical, true);
+    assert.equal(events[0].edge.mode, 'DetectionOnly');
     assert.equal(security.list({ stream: 'application' }).length, 0);
     assert.equal(security.list({ stream: 'waf' }).length, 1);
     assert.deepEqual(security.summary().waf, {

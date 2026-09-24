@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
+const { presentWafEvent } = require('./waf-rules');
 
 const LEVELS = new Set(['info', 'warning', 'critical']);
 const TYPES = new Set([
@@ -224,6 +225,9 @@ class SecurityEvents {
         disposition: ['observed_passed', 'origin_rejected', 'origin_rate_limited', 'waf_blocked',
           'edge_rejected', 'outcome_unknown'].includes(data.edge.disposition) ? data.edge.disposition : 'outcome_unknown',
         ruleIds: Array.isArray(data.edge.ruleIds) ? [...new Set(data.edge.ruleIds.filter((value) => /^\d{1,10}$/.test(String(value))).map(String))].slice(0, 32) : [],
+        ruleSummary: typeof data.edge.ruleSummary === 'string'
+          ? data.edge.ruleSummary.slice(0, 240).replace(/[\r\n]/g, '') : null,
+        mode: ['DetectionOnly', 'On'].includes(data.edge.mode) ? data.edge.mode : null,
         anomalyScore: Number.isInteger(data.edge.anomalyScore) && data.edge.anomalyScore >= 0 && data.edge.anomalyScore <= 1000
           ? data.edge.anomalyScore : null,
         interrupted: data.edge.interrupted === true,
@@ -292,6 +296,7 @@ class SecurityEvents {
         const expected = Buffer.from(this._hash(JSON.stringify(canonical)));
         event.integrityValid = supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
         delete event.integrity;
+        presentWafEvent(event);
         if (event.source?.scope === 'public' && !event.source.country) {
           const enriched = this.geoip.lookup(event.source.ip);
           event.source = { ...event.source, ...Object.fromEntries(Object.entries(enriched)
