@@ -142,6 +142,31 @@ templates, observation policy, and hardened Compose pattern. Production TLS,
 hostnames, editor authentication, audit storage, and network policy remain
 reviewed deployment configuration rather than image content.
 
+In the deployed topology, `access-waf` is Nginx with the ModSecurity 3.0.16
+module loaded; OWASP CRS 4.29.0 is the ruleset evaluated by that module. They
+are layers of one WAF service, not separate WAF containers. The private
+`access-proxy` remains a distinct hardened origin, while `access-portal`
+provides the application and Scene Management. Two certificate reloaders cover
+the public and origin Nginx processes. A sixth, networkless `waf-telemetry`
+service continuously reads the raw audit mount read-only and writes only
+bounded normalized findings for the portal to ingest.
+
+The normalizer removes headers, bodies, query values, cookies, authorization
+data, and uploads. Transaction identifiers that do not meet the ledger's
+bounded identifier syntax are converted to stable SHA-256-derived correlation
+IDs. A first scan marks existing audit files historical: those records remain
+available for investigation but do not create Telegram notifications. Live
+records are correlated by source, target, and category; duplicate events are
+aggregated and sustained incidents can produce bounded reminders according to
+the Scene Management policy.
+
+Start an internet-facing rollout with `MODSEC_RULE_ENGINE=DetectionOnly` and
+retain application/origin enforcement. Use a one-week observation window to
+compare WAF findings with origin outcomes, rate limits, and known legitimate
+flows. Enable high-confidence CRS protections incrementally only after that
+review; the mode remains deployment-controlled rather than changeable from the
+browser.
+
 More detail is available in the [architecture notes](docs/architecture/README.md).
 
 The public Platform repository pins a tested Gateway commit together with a
