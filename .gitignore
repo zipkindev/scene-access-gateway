@@ -11,6 +11,12 @@ backend/src/assets/*
 backend/src/assets/map/*
 !backend/src/assets/map/world-land-110m.json
 !backend/src/assets/map/world-atlas-LICENSE
+!backend/src/assets/map/world-land-50m.json
+!backend/src/assets/map/nasa-blue-marble-day.webp
+!backend/src/assets/map/nasa-black-marble-night.webp
+!backend/src/assets/map/nasa-city-lights.json
+!backend/src/assets/map/NASA-BLUE-BLACK-MARBLE-NOTICE
+!backend/src/assets/map/NASA-BLACK-MARBLE-NOTICE
 backend/src/audio-samples/
 frontend/artwork/audio/*.mp3
 coverage/

@@ -22,6 +22,10 @@ Docker build; the ignored host-side copy needed by unit tests is prepared by
 | `waf-collector.js` and `waf-ingestor.js` | Sanitized ModSecurity findings with explicit audit-status provenance; only WAF interruptions are final-status verified |
 | `source-intelligence*.js` | Cached passive evidence orchestration and the isolated, token-authenticated egress worker |
 | `application-contracts.js` | Fail-closed validation for routes, identity/QR behavior, proxy rules, browser sources, WAF exceptions, and acceptance journeys |
+
+The authenticated security globe uses only bundled, attributed map geometry
+and NASA Blue/Black Marble derivatives from `src/assets/map`; no map tiles or
+visitor addresses are sent to a third-party browser service.
 | `allowlist.js`, `assertion.js`, and registration modules | Destination authorization and short-lived access handoff |
 | `store.js` | Durable portal state with strict startup and migration behavior |
 
