@@ -40,6 +40,7 @@ services:
       ADMIN_PORT: "8082"
       ADMIN_ORIGIN: ${SAG_EDITOR_ORIGIN:-http://localhost:8081}
       PUBLIC_ORIGIN: ${SAG_PUBLIC_ORIGIN:-http://localhost:8080}
+      PUBLIC_HOST_ALIASES: ${SAG_PUBLIC_HOST_ALIASES:-}
       FIREWALL_ORIGIN: ${SAG_FIREWALL_ORIGIN:-http://localhost:8080}
       FIREWALL_UPSTREAM: ${SAG_FIREWALL_UPSTREAM:-https://firewall.example.invalid/}
       FIREWALL_UPSTREAM_IP: ${SAG_FIREWALL_UPSTREAM_IP:-127.0.0.1}

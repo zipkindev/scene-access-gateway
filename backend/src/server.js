@@ -20,6 +20,7 @@ const { DestinationRegistry } = require('./scene-destinations');
 const { getFirewallRegistration } = require('./firewall-registration');
 const { ArcadeLeaderboard } = require('./arcade-leaderboard');
 const { GeoIpLookup } = require('./geoip');
+const { createHostPolicy } = require('./host-policy');
 const { MaxMindSetup } = require('./maxmind-setup');
 const { SecurityEvents, sourceIp } = require('./security-events');
 const { TelegramAlerts } = require('./telegram-alerts');
@@ -28,8 +29,7 @@ const { WafIngestor } = require('./waf-ingestor');
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const ADMIN_PORT = process.env.ADMIN_PORT ? Number.parseInt(process.env.ADMIN_PORT, 10) : null;
 const ORIGIN = (process.env.PUBLIC_ORIGIN || 'http://localhost:8080').replace(/\/$/, '');
-const PUBLIC_URL = new URL(ORIGIN);
-const PUBLIC_HOST = PUBLIC_URL.host;
+const allowedHost = createHostPolicy(ORIGIN, process.env.PUBLIC_HOST_ALIASES);
 const FIREWALL_ORIGIN = (process.env.FIREWALL_ORIGIN || 'http://localhost:8080').replace(/\/$/, '');
 const MANAGEMENT_SOURCE_IP = process.env.MANAGEMENT_SOURCE_IP || '127.0.0.1';
 const CHALLENGE_TTL = 15 * 60 * 1000;
@@ -141,11 +141,6 @@ function sequenceUnlocked(token, active, destinationId) {
       && clickSessions.get(token)?.unlocks.has(destinationId));
 }
 function ip(req) { return sourceIp(req); }
-function allowedHost(value) {
-  if (value === PUBLIC_HOST) return true;
-  return PUBLIC_URL.hostname === 'localhost'
-    && value === `127.0.0.1${PUBLIC_URL.port ? `:${PUBLIC_URL.port}` : ''}`;
-}
 function peerIp(req) {
   const value = String(req.socket?.remoteAddress || '');
   return value.startsWith('::ffff:') ? value.slice(7) : value;

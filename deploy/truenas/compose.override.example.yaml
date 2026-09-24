@@ -8,6 +8,7 @@ services:
   backend:
     environment:
       PUBLIC_ORIGIN: ${SAG_PUBLIC_ORIGIN:?Set the public portal origin}
+      PUBLIC_HOST_ALIASES: ${SAG_PUBLIC_HOST_ALIASES:-}
       ADMIN_ORIGIN: ${SAG_EDITOR_ORIGIN:?Set the private editor origin}
       FIREWALL_ORIGIN: ${SAG_FIREWALL_ORIGIN:?Set the firewall gateway origin}
       FIREWALL_UPSTREAM: ${SAG_FIREWALL_UPSTREAM:?Set the protected firewall upstream}

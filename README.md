@@ -167,6 +167,14 @@ flows. Enable high-confidence CRS protections incrementally only after that
 review; the mode remains deployment-controlled rather than changeable from the
 browser.
 
+Deployments that serve additional public names declare them explicitly with
+`SAG_PUBLIC_HOST_ALIASES`; for example, the arcade hostname can share the
+portal without becoming a wildcard trust rule. The backend accepts only the
+canonical hostname and configured aliases on the canonical origin port or the
+default external TLS port. WAF and origin Nginx allowlists must contain the
+same names, while unknown hosts, arbitrary ports, credentials, and path-shaped
+Host values continue to fail closed.
+
 More detail is available in the [architecture notes](docs/architecture/README.md).
 
 The public Platform repository pins a tested Gateway commit together with a

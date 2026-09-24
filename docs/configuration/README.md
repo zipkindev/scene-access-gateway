@@ -54,6 +54,12 @@ denies that route and removes caller-supplied management source headers. Do not
 set this value to a shared public reverse proxy address or publish the backend
 port.
 
+`SAG_PUBLIC_HOST_ALIASES` is a comma-separated list of additional public DNS
+hostnames served by the same portal, such as `arcade.example.com`. The backend
+accepts the canonical `SAG_PUBLIC_ORIGIN` hostname and only these explicit
+aliases, with either the canonical origin port or the default external port.
+Do not use wildcards or include schemes, paths, or ports in the alias list.
+
 Production TLS/WAF configuration must preserve normalized access logging,
 secret-probe and management-route denials, source-header replacement, request
 timeouts, compression, and rate limits. Keep new WAF policies in observation
