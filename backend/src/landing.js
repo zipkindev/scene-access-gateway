@@ -15,6 +15,7 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
   const firewall = sceneConfig.hotspots.find((item) => item.destinationId === 'firewall');
   if (!torrentharbor?.enabled) throw new Error('Unsupported public scene');
   const motion = sceneConfig.motion;
+  const clickDebugger = sceneConfig.diagnostics.clickDebugger;
   const interactive = sceneConfig.interaction.kind === 'minesweeper';
   // This preset is bound to the exact calibrated table artwork, including a
   // trusted optimizer derivative. No other selectable image inherits it.
@@ -179,6 +180,14 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
       @media (prefers-reduced-motion: reduce), (max-width: 700px) { .motion-layer { animation: none; } .motion-rain { display:none; } }
       .qr-overlay { align-items: center; background: rgba(0, 0, 0, .24); display: flex; justify-content: center; position: fixed; z-index: 20; }
       .qr-overlay[hidden] { display: none; }
+      .scene-click-status { background:rgba(3,13,23,.94); border:1px solid #5eeaff; border-radius:999px; bottom:18px; color:#e7fbff; font:600 13px/1.2 ui-sans-serif,system-ui,sans-serif; left:50%; max-width:calc(100vw - 32px); opacity:0; padding:8px 13px; pointer-events:none; position:fixed; transform:translate(-50%,8px); transition:opacity .16s ease,transform .16s ease; z-index:31; }
+      .scene-click-status.visible { opacity:1; transform:translate(-50%,0); }
+      .scene-click-status.accepted { border-color:#63ffd0; color:#baffea; }
+      .scene-click-status.rejected { border-color:#ff627d; color:#ffd4dc; }
+      .scene-click-receipt { border:2px solid #5eeaff; border-radius:50%; box-shadow:0 0 13px #31dfff; height:26px; margin:-15px 0 0 -15px; pointer-events:none; position:fixed; transition:border-color .18s ease,box-shadow .18s ease,opacity .45s ease,transform .45s ease; width:26px; z-index:30; }
+      .scene-click-receipt.accepted { border-color:#63ffd0; box-shadow:0 0 16px #30ffae; transform:scale(1.3); }
+      .scene-click-receipt.rejected { border-color:#ff4567; box-shadow:0 0 16px #ff3156; transform:scale(.78); }
+      .scene-click-receipt.done { opacity:0; }
       .qr.scan { background: #f7f7f5; box-shadow: 0 18px 46px rgba(0, 0, 0, .55); padding: 13px; position: relative; }
       .qr svg, .qr img { display: block; height: auto; width: 100%; }
       .qr-mark { align-items: center; aspect-ratio: 1; background: #08090b; border: 2px solid #f7f7f5; border-radius: 50%; color: #f7f7f5; display: flex; font: 700 clamp(18px, 5vw, 30px)/1 ui-sans-serif, system-ui, sans-serif; justify-content: center; left: 50%; letter-spacing: -0.08em; max-width: 44px; min-width: 28px; pointer-events: none; position: absolute; text-indent: -0.08em; top: 50%; transform: translate(-50%, -50%); width: 14%; }
@@ -220,6 +229,7 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
     ${carousel ? '<dialog class="score-entry" id="scoreEntry"><form id="scoreForm" method="dialog"><h2>TOP 10 SCORE</h2><p id="scoreMessage"></p><label>Three initials <input id="scoreInitials" maxlength="3" pattern="[A-Za-z]{3}" autocomplete="off" required></label><div><button type="submit">SAVE SCORE</button><button type="button" id="scoreSkip">SKIP</button></div></form></dialog>' : ''}
     <div class="qr-overlay ${futureMotion ? 'theme-qr' : ''}" id="scanOverlay" hidden><div class="qr scan"><img id="scanImage" alt=""><div class="qr-mark" aria-hidden="true">Z</div></div></div>
     ${firewall?.enabled ? `<div class="qr-overlay ${futureMotion ? 'theme-qr' : ''}" id="firewallOverlay" hidden><div class="qr scan" aria-label="Firewall sign-in QR code"></div></div>` : ''}
+    ${clickDebugger ? '<output class="scene-click-status" id="sceneClickStatus" aria-live="polite"></output>' : ''}
     <script nonce="${scriptNonce}" src="/scene-framing.js?v=23"></script>
     ${interactive ? `<script nonce="${scriptNonce}" src="/scene-game.js?v=60"></script>` : ''}
     ${carousel ? `<script nonce="${scriptNonce}" src="/future-game-carousel.js?v=66"></script><script nonce="${scriptNonce}" src="/future-nature-audio.js?v=46"></script><script nonce="${scriptNonce}" src="/future-sample-audio.js?v=48"></script>` : ''}
@@ -255,13 +265,36 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
       const firewallOverlay = document.querySelector('#firewallOverlay');
       const firewallCard = firewallOverlay?.querySelector('.qr.scan');
       const qrCurrent = document.querySelector('.qr-current');
+      const sceneClickStatus = document.querySelector('#sceneClickStatus');
+      const clickDebugger = ${clickDebugger};
       const frames = ${JSON.stringify(sceneConfig.viewport.frames || {})};
       const camera = { width: 0, height: 0, left: 0, top: 0, zoom: 1, moved: false, profile: 'full',
         viewport: null };
       const pointers = new Map();
       let pinch = null;
-      let suppressClick = false;
-      let checkingClick = false;
+      let clickQueue = Promise.resolve();
+      let clickStatusTimer = 0;
+      function reportSceneClick(message, state = '') {
+        if (!clickDebugger || !sceneClickStatus) return;
+        clearTimeout(clickStatusTimer);
+        sceneClickStatus.textContent = message;
+        sceneClickStatus.className = 'scene-click-status visible ' + state;
+        clickStatusTimer = setTimeout(() => { sceneClickStatus.className = 'scene-click-status'; }, 2600);
+      }
+      function sceneClickReceipt(clientX, clientY) {
+        if (!clickDebugger) return null;
+        const receipt = document.createElement('span');
+        receipt.className = 'scene-click-receipt';
+        receipt.style.left = clientX + 'px'; receipt.style.top = clientY + 'px';
+        document.body.append(receipt);
+        return receipt;
+      }
+      function settleSceneClick(receipt, state) {
+        if (!receipt) return;
+        receipt.classList.add(state);
+        setTimeout(() => receipt.classList.add('done'), 700);
+        setTimeout(() => receipt.remove(), 1250);
+      }
       function visibleViewport() {
         const viewport = window.visualViewport;
         return viewport ? { left: viewport.offsetLeft, top: viewport.offsetTop,
@@ -357,27 +390,37 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
       }
       scanOverlay.addEventListener('click', toggleScanView);
       if (firewallOverlay) firewallOverlay.addEventListener('click', () => closeQrOverlay(firewallOverlay));
-      scene.addEventListener('click', async (event) => {
-        if (suppressClick) { suppressClick = false; return; }
-        if (checkingClick || !scanOverlay.hidden || (firewallOverlay && !firewallOverlay.hidden)) return;
-        const point = eventPoint(event);
+      function queueSceneHit(clientX, clientY) {
+        if (!scanOverlay.hidden || (firewallOverlay && !firewallOverlay.hidden)) return;
+        const receipt = sceneClickReceipt(clientX, clientY);
+        reportSceneClick('Click detected by browser · sending to server');
+        const point = eventPoint({ clientX, clientY });
         const x = (point.x - camera.left) / camera.width;
         const y = (point.y - camera.top) / camera.height;
-        if (![x, y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) return;
-        ${carousel ? `const boardX=x*1672,boardY=y*941;const gameControl=(boardY>=807&&boardY<=941&&((boardX>=435&&boardX<=565)||(boardX>=610&&boardX<=1035)||(boardX>=1080&&boardX<=1218)))||Math.hypot(boardX-820,boardY-729)<=42;if(gameControl)return;` : ''}
-        checkingClick = true;
-        try {
+        if (![x, y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) {
+          settleSceneClick(receipt, 'rejected'); reportSceneClick('Click is outside the active scene', 'rejected'); return;
+        }
+        ${carousel ? `const boardX=x*1672,boardY=y*941;const gameControl=(boardY>=807&&boardY<=941&&((boardX>=435&&boardX<=565)||(boardX>=610&&boardX<=1035)||(boardX>=1080&&boardX<=1218)))||Math.hypot(boardX-820,boardY-729)<=42;if(gameControl){receipt?.remove();reportSceneClick('Arcade control selected · scene sequence unchanged');return;}` : ''}
+        const click = { x, y, width: camera.width, height: camera.height };
+        clickQueue = clickQueue.then(async () => {
           const response = await fetch('/api/scene/hit', { method: 'POST', credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ x, y, width: camera.width, height: camera.height }) });
-          if (!response.ok) return;
+            headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(click) });
+          if (!response.ok) {
+            settleSceneClick(receipt, 'rejected');
+            reportSceneClick('Server rejected click · HTTP ' + response.status, 'rejected'); return;
+          }
           const result = await response.json();
+          settleSceneClick(receipt, result.accepted ? 'accepted' : 'rejected');
+          if (result.acceptedStep === 'complete') reportSceneClick('Sequence complete · QR confirmed by server', 'accepted');
+          else if (result.accepted) reportSceneClick('Point ' + result.acceptedStep + ' confirmed by server', 'accepted');
+          else reportSceneClick('Click reached server · sequence reset', 'rejected');
           if (result.destination === 'torrentharbor') toggleScanView();
           else if (result.destination === 'firewall') await openFirewallQr();
-        } catch (_) {
-          // A failed lookup leaves the scene interactive for the next click.
-        } finally { checkingClick = false; }
-      });
+        }).catch(() => {
+          settleSceneClick(receipt, 'rejected');
+          reportSceneClick('Click could not reach server', 'rejected');
+        });
+      }
       function zoomAt(nextZoom, x, y) {
         const zoom = Math.min(${sceneConfig.viewport.maximumZoom}, Math.max(${sceneConfig.viewport.minimumZoom}, nextZoom));
         const fractionX = (x - camera.left) / camera.width;
@@ -432,32 +475,32 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
             zoomAt(Math.max(camera.zoom / 1.15, Math.min(camera.zoom * 1.15, requested)),
               (a.x + b.x) / 2, (a.y + b.y) / 2);
           }
-          suppressClick = true;
         } else if (pointers.size === 1 && Math.hypot(dx, dy) > 0) {
           if (!previous.active) {
             if (Math.hypot(point.x - previous.startX, point.y - previous.startY) < 8) return;
             if (!scene.hasPointerCapture(event.pointerId)) scene.setPointerCapture(event.pointerId);
             pointers.set(event.pointerId, { ...previous, x: point.x, y: point.y, active: true });
-            suppressClick = true;
             return;
           }
           camera.left += Math.max(-32, Math.min(32, dx));
           camera.top += Math.max(-32, Math.min(32, dy));
           camera.moved = true;
           scene.classList.add('panning');
-          suppressClick = true;
           paintCamera();
         }
       });
-      function endPan(event) {
+      function endPan(event, activate = false) {
+        const pointer = pointers.get(event.pointerId);
+        const stationary = activate && pointers.size === 1 && !pinch && pointer && !pointer.active
+          && Math.hypot(eventPoint(event).x - pointer.startX, eventPoint(event).y - pointer.startY) < 8;
         pointers.delete(event.pointerId);
         if (pointers.size < 2) pinch = null;
         if (!pointers.size) {
           scene.classList.remove('panning');
-          setTimeout(() => { suppressClick = false; }, 0);
         }
+        if (stationary && event.button === 0) queueSceneHit(event.clientX, event.clientY);
       }
-      scene.addEventListener('pointerup', endPan);
+      scene.addEventListener('pointerup', (event) => endPan(event, true));
       scene.addEventListener('pointercancel', endPan);
       scene.addEventListener('lostpointercapture', endPan);
       window.addEventListener('blur', () => { pointers.clear(); pinch = null; scene.classList.remove('panning'); });

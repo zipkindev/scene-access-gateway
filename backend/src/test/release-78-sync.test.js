@@ -54,8 +54,19 @@ test('release 78 public source retains final challenge, score, and CRT contracts
   const carousel = source('future-game-carousel.js');
   assert.match(landing, /future-wolf3d-crt\.js\?v=78/);
   assert.match(landing, /if \(result\.terminal\) \{ clearInterval\(portalPoll\); return; \}/);
+  assert.match(landing, /let clickQueue = Promise\.resolve\(\)/);
+  assert.match(landing, /clickQueue = clickQueue\.then/);
+  assert.match(landing, /function queueSceneHit\(clientX, clientY\)/);
+  assert.match(landing, /Click detected by browser · sending to server/);
+  assert.match(landing, /Point ' \+ result\.acceptedStep \+ ' confirmed by server/);
+  assert.match(landing, /Click reached server · sequence reset/);
+  assert.match(landing, /scene\.addEventListener\('pointerup', \(event\) => endPan\(event, true\)\)/);
+  assert.doesNotMatch(landing, /scene\.addEventListener\('click', \(event\) => \{\s*if \(suppressClick/);
+  assert.doesNotMatch(landing, /if \(checkingClick/);
   assert.match(server, /url\.pathname === '\/api\/arcade\/scores'/);
   assert.match(server, /JSON\.stringify\(\{ terminal: true \}\)/);
+  assert.match(server, /portalChallengeCookie\(token\)/);
+  assert.match(server, /JSON\.stringify\(\{ destination, accepted, acceptedStep \}\)/);
   for (const game of ['fusion', 'classic2048', 'minesweeper', 'memory', 'lights',
     'treasure', 'knight', 'pegs', 'reversi', 'four', 'circuit']) {
     assert.ok(carousel.includes(game), `missing Arcade game contract: ${game}`);
@@ -63,4 +74,22 @@ test('release 78 public source retains final challenge, score, and CRT contracts
   for (const text of [landing, server, source('scene-admin.js'), source('scene-config.js')]) {
     assert.doesNotMatch(text, /zipkin\.dev|192\.168\.|\bmzipkin\b|\bmike\b/i);
   }
+});
+
+test('public click receipts number accepted sequence points for humans', () => {
+  const server = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
+  assert.match(server, /const acceptedStep = result\.progress \? result\.progress\.next :/);
+  assert.doesNotMatch(server, /result\.progress\.next - 1/);
+});
+
+test('public click debugger is hidden by default and rendered only when enabled', () => {
+  const normal = landingPage(null, null, 'nonce', DEFAULT_SCENE);
+  assert.doesNotMatch(normal, /<output class="scene-click-status"/);
+  assert.match(normal, /const clickDebugger = false/);
+
+  const debugScene = structuredClone(DEFAULT_SCENE);
+  debugScene.diagnostics.clickDebugger = true;
+  const debug = landingPage(null, null, 'nonce', debugScene);
+  assert.match(debug, /<output class="scene-click-status"/);
+  assert.match(debug, /const clickDebugger = true/);
 });

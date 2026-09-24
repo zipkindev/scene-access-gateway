@@ -32,6 +32,8 @@ flowchart TB
     WafAudit --> Collector[Networkless telemetry collector]
     Collector --> WafFeed[(Normalized WAF findings)]
     WafFeed --> Backend
+    Backend -->|authenticated bounded request| Intelligence[Isolated source-intelligence worker]
+    Intelligence -->|constrained egress| Registries[RDAP, DNS, routing sources]
     Frontend -->|private network| Backend
     Backend --> State[(Protected persistent state)]
     Backend --> Identity[Authentik and SMTP]
@@ -54,6 +56,8 @@ overlay is absent.
 | SMTP | Delivers one-time confirmation and registration links | Receives only the intended address and expiring link |
 | Security ledger | Correlates application outcomes with source IP and optional offline GeoIP/ASN context | Protected state volume with bounded retention; never web-accessible directly |
 | Destination proxy | Converts a valid portal session into a short-lived signed identity assertion before relaying | Upstream services remain private and receive only approved traffic |
+| Source-intelligence worker | Performs bounded passive RDAP, reverse-DNS, and routing lookups for an operator-selected source | Unexposed service with no portal-state mount; authenticated requests only; active mode off by default |
+| Application contract | Declares route/host, origin variables, identity, QR, proxy, CSP, WAF, and verification requirements | CI rejects incomplete, wildcard, or undocumented exceptions before target overlays are promoted |
 | Optional extensions | Adds independently licensed experiences through a versioned read-only mount | Cannot make the public core depend on proprietary datasets |
 
 ## WAF request flow
@@ -101,3 +105,9 @@ bodies into an application database. See [security monitoring](../security-monit
 for retention, trusted-client-IP, GeoIP, and alerting guidance. Normalized WAF
 findings can become deduplicated Telegram incidents without exposing raw audit
 content.
+
+ModSecurity's JSON audit response code is evidence from the audit stream, not
+automatically the final edge response. The normalized record carries that
+provenance, the UI and Telegram label it `WAF audit HTTP`, and only an actual
+WAF interruption is status-verified. Investigations correlate non-interrupted
+findings with the origin/edge access log before changing application behavior.

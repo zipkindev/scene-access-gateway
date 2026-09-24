@@ -9,7 +9,9 @@ The intended interface is:
 - `bootstrap.sh`: create ignored local directories and example configuration;
 - `init-secrets.sh`: create protected local Authentik/PostgreSQL secret files;
 - `test.sh`: run source, unit, and configuration validation, including the
-  host-neutral WAF Compose policy;
+  host-neutral WAF Compose policy and application-onboarding contracts;
+- `check-application-contracts.js`: reject incomplete route, identity, QR,
+  proxy, CSP, WAF-exception, or acceptance-journey declarations;
 - `check-waf.sh`: reject environment-specific values and validate the tracked
   WAF deployment model with non-secret placeholders;
 - `smoke-test.sh`: launch and remove an isolated local route-test stack;

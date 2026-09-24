@@ -27,6 +27,13 @@ const BACKUP = /(?:^|\/)[^/]{1,180}(?:\.bak|\.backup|\.old|\.orig|\.save|\.swp|~
 const FRAMEWORK = /(?:^|\/)(?:wp-admin|wp-login\.php|phpmyadmin|server-status|actuator|vendor\/phpunit|_profiler\/phpinfo(?:\.php)?)(?:\/|$)/i;
 const REQUEST_ID = /^[0-9a-f-]{36}$/;
 
+function selectedText(value, label, expression, maximumLength) {
+  const requested = Array.isArray(value) ? value : value ? [value] : [];
+  if (requested.length > 16 || requested.some((item) => typeof item !== 'string' || !expression.test(item)
+    || item.length > maximumLength)) throw new Error(`Invalid ${label}`);
+  return new Set(requested);
+}
+
 function safeDecode(value) {
   try { return decodeURIComponent(value); } catch (_) { return value; }
 }
@@ -218,6 +225,7 @@ class SecurityEvents {
         method: String(suppliedHttp.method || '').slice(0, 12),
         path: safePath(String(suppliedHttp.path || '/').split('?')[0]),
         status: Number.isInteger(suppliedHttp.status) ? suppliedHttp.status : null,
+        statusSource: suppliedHttp.statusSource === 'modsecurity_audit' ? 'modsecurity_audit' : null,
         agentHash: null,
       } : null,
       identityHash: data.identity ? this._hash(String(data.identity).trim().toLowerCase()) : null,
@@ -234,6 +242,7 @@ class SecurityEvents {
         anomalyScore: Number.isInteger(data.edge.anomalyScore) && data.edge.anomalyScore >= 0 && data.edge.anomalyScore <= 1000
           ? data.edge.anomalyScore : null,
         interrupted: data.edge.interrupted === true,
+        statusVerified: data.edge.statusVerified === true,
         transactionId: /^[A-Za-z0-9_-]{1,128}$/.test(data.edge.transactionId || '')
           ? data.edge.transactionId : null,
         historical: data.edge.historical === true,
@@ -275,23 +284,37 @@ class SecurityEvents {
     }));
   }
 
-  list(options = {}) {
-    const limit = Math.min(250, Math.max(1, Number.parseInt(options.limit || '100', 10) || 100));
+  *matching(options = {}) {
     const severities = selected(options.severity, LEVELS, 'severity');
     const streams = selected(options.stream, new Set(['application', 'waf']), 'stream');
     const types = selected(options.type, TYPES, 'event type');
     const categories = selected(options.category, CATEGORIES, 'category');
     const countries = selected(options.country, new Set((Array.isArray(options.country) ? options.country
       : options.country ? [options.country] : []).filter((item) => /^[A-Z]{2}$/.test(item))), 'country');
+    const requestedCities = Array.isArray(options.city) ? options.city : options.city ? [options.city] : [];
+    if (requestedCities.length > 16 || requestedCities.some((item) => typeof item !== 'string'
+      || !item.trim() || item.length > 120 || /[\u0000-\u001f\u007f]/.test(item))) throw new Error('Invalid city');
+    const cities = new Set(requestedCities);
+    const methods = selectedText(options.method, 'method', /^[A-Za-z0-9-]+$/, 12);
+    const statuses = selectedText(options.status, 'status', /^[1-5][0-9]{2}$/, 3);
+    const dispositions = selectedText(options.disposition, 'disposition', /^[a-z0-9_-]+$/, 80);
     const sources = sourceBlockList(options.source);
-    const since = Number.isFinite(Date.parse(options.since || '')) ? Date.parse(options.since) : 0;
-    const events = [];
+    const requestedSince = options.since;
+    if (requestedSince && requestedSince !== 'all' && !Number.isFinite(Date.parse(requestedSince))) {
+      throw new Error('Invalid event time range');
+    }
+    const since = requestedSince === 'all' ? 0
+      : Number.isFinite(Date.parse(requestedSince || '')) ? Date.parse(requestedSince) : 0;
+    const requestedBefore = options.before;
+    if (requestedBefore && !Number.isFinite(Date.parse(requestedBefore))) throw new Error('Invalid event cursor');
+    const before = requestedBefore ? Date.parse(requestedBefore) : Infinity;
     for (const name of this._files().reverse()) {
       const lines = fs.readFileSync(path.join(this.directory, name), 'utf8').trim().split('\n').filter(Boolean).reverse();
       for (const line of lines) {
         let event;
         try { event = JSON.parse(line); } catch (_) { continue; }
-        if (Date.parse(event.at) < since) continue;
+        const eventTime = Date.parse(event.at);
+        if (eventTime < since || eventTime >= before) continue;
         const integrity = event.integrity;
         const canonical = { ...event };
         delete canonical.integrity;
@@ -314,28 +337,56 @@ class SecurityEvents {
           || (types.size && !types.has(event.type))
           || (categories.size && !categories.has(category))
           || (countries.size && !countries.has(event.source?.country))
+          || (cities.size && !cities.has(event.source?.city))
+          || (methods.size && !methods.has(event.http?.method))
+          || (statuses.size && !statuses.has(String(event.http?.status)))
+          || (dispositions.size && !dispositions.has(event.edge?.disposition || event.outcome))
           || (sources.count && (!sourceVersion || !sources.block.check(event.source.ip,
             sourceVersion === 4 ? 'ipv4' : 'ipv6')))) continue;
-        events.push(event);
-        if (events.length >= limit) return events;
+        yield event;
       }
+    }
+  }
+
+  list(options = {}) {
+    const limit = Math.min(250, Math.max(1, Number.parseInt(options.limit || '100', 10) || 100));
+    const events = [];
+    for (const event of this.matching(options)) {
+      events.push(event);
+      if (events.length >= limit) break;
     }
     return events;
   }
 
+  page(options = {}) {
+    const limit = Math.min(250, Math.max(1, Number.parseInt(options.limit || '100', 10) || 100));
+    const events = [];
+    for (const event of this.matching(options)) {
+      events.push(event);
+      if (events.length > limit) break;
+    }
+    const hasMore = events.length > limit;
+    if (hasMore) events.pop();
+    return { events, hasMore, nextBefore: hasMore ? events.at(-1)?.at || null : null };
+  }
+
   filterOptions(options = {}) {
-    const matchingTypes = this.list({ ...options, type: [], limit: 250 });
-    const matchingCategories = this.list({ ...options, category: [], limit: 250 });
+    const matchingTypes = this.matching({ ...options, type: [] });
+    const matchingCategories = this.matching({ ...options, category: [] });
     return {
-      types: [...new Set(matchingTypes.map((event) => event.type))].sort(),
-      categories: [...new Set(matchingCategories.map(effectiveCategory).filter(Boolean))].sort(),
+      types: [...new Set([...matchingTypes].map((event) => event.type))].sort(),
+      categories: [...new Set([...matchingCategories].map(effectiveCategory).filter(Boolean))].sort(),
     };
   }
 
-  map(now = Date.now()) {
-    const events = this.list({ limit: 250, since: new Date(now - 24 * 60 * 60 * 1000).toISOString() });
+  map(options = {}, now = Date.now()) {
+    if (typeof options === 'number') { now = options; options = {}; }
+    const since = options.since === 'all' ? null
+      : options.since || new Date(now - 24 * 60 * 60 * 1000).toISOString();
     const sources = new Map();
-    for (const event of events) {
+    let total = 0;
+    for (const event of this.matching({ since })) {
+      total += 1;
       const source = event.source || {};
       if (source.scope !== 'public' || !net.isIP(source.ip)) continue;
       const latitude = source.latitude;
@@ -356,7 +407,7 @@ class SecurityEvents {
     let destinationIp = this.destinationIp;
     if (!destinationIp) {
       const targets = new Map();
-      for (const event of events) {
+      for (const event of this.matching({ since })) {
         const target = event.edge?.target;
         if (net.isIP(target || '')) targets.set(target, (targets.get(target) || 0) + 1);
       }
@@ -370,19 +421,24 @@ class SecurityEvents {
         organization: location.organization || null, accuracyRadiusKm: location.accuracyRadiusKm ?? null,
       } : null;
     return {
-      windowHours: 24, total: events.length, located: [...sources.values()].reduce((sum, source) => sum + source.count, 0),
+      windowHours: since ? Math.max(1, Math.round((now - Date.parse(since)) / 3600000)) : null,
+      total, located: [...sources.values()].reduce((sum, source) => sum + source.count, 0),
       sources: [...sources.values()].sort((a, b) => b.count - a.count || a.ip.localeCompare(b.ip)),
       destination, destinationConfigured: Boolean(this.destinationIp),
     };
   }
 
-  summary(now = Date.now()) {
-    const events = this.list({ limit: 250, since: new Date(now - 24 * 60 * 60 * 1000).toISOString() });
+  summary(options = {}, now = Date.now()) {
+    if (typeof options === 'number') { now = options; options = {}; }
+    const since = options.since === 'all' ? null
+      : options.since || new Date(now - 24 * 60 * 60 * 1000).toISOString();
+    const events = [...this.matching({ since })];
     const count = (predicate) => events.filter(predicate).length;
     const countries = new Map();
     for (const event of events) if (event.source?.country) countries.set(event.source.country, (countries.get(event.source.country) || 0) + 1);
     return {
-      windowHours: 24, total: events.length,
+      windowHours: since ? Math.max(1, Math.round((now - Date.parse(since)) / 3600000)) : null,
+      oldestAt: events.at(-1)?.at || null, newestAt: events[0]?.at || null, total: events.length,
       warnings: count((event) => event.severity === 'warning'),
       critical: count((event) => event.severity === 'critical' || event.integrityValid === false),
       integrityFailures: count((event) => event.integrityValid === false),

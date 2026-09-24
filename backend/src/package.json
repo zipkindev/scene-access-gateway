@@ -7,7 +7,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check landing.js && node --check scene-config.js && node --check scene-assets.js && node --check scene-destinations.js && node --check scene-admin.js && node --check scene-admin-client.js && node --check mail.js && node --check allowlist.js && node --check assertion.js && node --check management.js && node --check store.js && node --check geoip.js && node --check maxmind-setup.js && node --check security-events.js && node --check telegram-alerts.js && node --check waf-collector.js && node --check waf-ingestor.js",
+    "check": "node --check server.js && node --check landing.js && node --check scene-config.js && node --check scene-assets.js && node --check scene-destinations.js && node --check scene-admin.js && node --check scene-admin-client.js && node --check security-globe.js && node --check state-compatibility.js && node --check mail.js && node --check allowlist.js && node --check assertion.js && node --check management.js && node --check store.js && node --check geoip.js && node --check maxmind-setup.js && node --check security-events.js && node --check source-intelligence.js && node --check source-intelligence-worker.js && node --check telegram-alerts.js && node --check waf-collector.js && node --check waf-ingestor.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {

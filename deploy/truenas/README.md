@@ -34,6 +34,13 @@ using an address as a rate-limit or incident-response key. Remove client-sent
 management trust headers and route trusted management calls over the private
 backend network.
 
+The target overlay must remain consistent with
+[`deploy/applications.json`](../applications.json). For each protected app,
+verify the declared host/path, upstream TLS identity, origin rewrite, cookies,
+browser-policy sources, Authentik/QR behavior, and negative-route response.
+Target-only WAF exceptions still need the same exact rule/path/method,
+rationale, review date, and journey evidence as the tracked contract.
+
 Keep new WAF rules in observation mode through the validation matrix, then
 enable high-confidence denials incrementally. Preserve the portable one-day
 HSTS starter policy at the TLS edge; do not lengthen it or add

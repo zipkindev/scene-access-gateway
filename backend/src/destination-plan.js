@@ -1,7 +1,7 @@
 'use strict';
 
 const FIREWALL_UPSTREAM = process.env.FIREWALL_UPSTREAM || 'https://firewall.example.invalid/';
-const FIREWALL_PUBLIC = process.env.FIREWALL_ORIGIN || 'http://localhost:8080/';
+const FIREWALL_PUBLIC = (process.env.FIREWALL_ORIGIN || 'http://localhost:8080').replace(/\/*$/, '/');
 const FIREWALL_UPSTREAM_IP = process.env.FIREWALL_UPSTREAM_IP || '127.0.0.1';
 const FIREWALL_TLS_NAME = process.env.FIREWALL_TLS_NAME || 'firewall.example.invalid';
 const PORTAL_PUBLIC_ORIGIN = (process.env.PUBLIC_ORIGIN || 'http://localhost:8080').replace(/\/$/, '');

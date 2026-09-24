@@ -110,13 +110,47 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(client, /administrator activity/);
   assert.match(client, /Scene Management/);
   assert.match(client, /GeoIP databases updated/);
-  assert.match(client, /WAF observed, not blocked/);
-  assert.match(client, /status alone does not prove access or exploitation/);
-  assert.match(client, /Observed only \(DetectionOnly; not blocked\)/);
+  assert.match(client, /WAF audit-reported 2xx\/3xx/);
+  assert.match(client, /use the correlated edge access log for the final response status/);
+  assert.match(client, /Observed only \(DetectionOnly; audit reported 2xx\/3xx\)/);
+  assert.match(client, /WAF audit HTTP/);
   assert.match(client, /securityMap/);
-  assert.match(client, /map-hotspot/);
+  assert.match(client, /SecurityGlobe\.create/);
+  assert.match(client, /Threat connection globe/);
+  assert.match(client, /Top cities/);
+  assert.match(client, /different IPs/);
+  assert.match(client, /destination →/);
   assert.match(client, /toggleMapSource/);
-  assert.match(html, /Connection origins/);
+  assert.match(client, /toggleMapCity/);
+  assert.match(client, /All retained events/);
+  assert.match(client, /securityWindow/);
+  assert.match(client, /Source intelligence/);
+  assert.match(client, /Investigate source/);
+  assert.match(client, /Run ethical reconnaissance/);
+  assert.match(client, /function renderIntelValue/);
+  assert.match(client, /intelLabel\(item\.value\) \+ ' · ' \+ item\.count\.toLocaleString\(\)/);
+  assert.match(html, /source-intelligence-value/);
+  assert.match(client, /function confirmSourceRecon/);
+  assert.match(client, /source-intelligence-endpoint/);
+  assert.match(client, /data-security-filter-kind/);
+  assert.match(client, /filterKind: 'method'/);
+  assert.match(client, /filterKind: 'status'/);
+  assert.match(client, /filterKind: 'disposition'/);
+  assert.doesNotMatch(client, /const accepted = window\.confirm\('This will contact only/);
+  assert.match(html, /Confirm ethical reconnaissance/);
+  assert.match(html, /Run bounded reconnaissance/);
+  assert.match(client, /I understand this contacts the remote host/);
+  assert.match(client, /Export sanitized JSON/);
+  assert.match(html, /security-globe\.js\?v=99/);
+  assert.match(html, /Enable public click debugger/);
+  assert.match(client, /scene\.diagnostics = \{ clickDebugger: elements\.clickDebugger\.checked \}/);
+  assert.match(html, /admin\.js\?v=104/);
+  const globe = fs.readFileSync(path.join(__dirname, '../security-globe.js'), 'utf8');
+  assert.match(globe, /cameraSequence/);
+  assert.match(globe, /routeDuration/);
+  assert.match(globe, /world-land-50m\.json/);
+  assert.match(globe, /nasa-blue-marble-day\.webp/);
+  assert.match(globe, /nasa-black-marble-night\.webp/);
 });
 
 test('stored WAF protocol findings are re-ranked for presentation without rewriting the ledger', () => temporary((directory) => {
@@ -189,22 +223,56 @@ test('security map aggregates located sources and uses the configured public des
   assert.equal(map.destinationConfigured, true);
 }));
 
-test('security event filters compose across severity, category, country, exact IP, and CIDR', () => temporary((directory) => {
+test('retained-window summaries and maps aggregate beyond the 250-card display limit', () => temporary((directory) => {
+  const events = new SecurityEvents(directory, noGeo);
+  const newest = Date.now();
+  events.matching = function* matching(options = {}) {
+    const before = options.before ? Date.parse(options.before) : Infinity;
+    for (let index = 0; index < 320; index += 1) {
+      const at = new Date(newest - index * 1000).toISOString();
+      if (Date.parse(at) >= before) continue;
+      yield {
+      at, type: 'portal_visit', severity: 'info',
+      outcome: 'challenge_created', source: { scope: 'public', ip: '203.0.113.8' }, integrityValid: true,
+    };
+    }
+  };
+  assert.equal(events.list({ limit: 250, since: 'all' }).length, 250);
+  assert.equal(events.summary({ since: 'all' }).total, 320);
+  assert.equal(events.map({ since: 'all' }).total, 320);
+  const first = events.page({ limit: 250, since: 'all' });
+  assert.equal(first.events.length, 250);
+  assert.equal(first.hasMore, true);
+  const second = events.page({ limit: 250, since: 'all', before: first.nextBefore });
+  assert.equal(second.events.length, 70);
+  assert.equal(second.hasMore, false);
+}));
+
+test('security event filters compose across evidence, geography, exact IP, and CIDR', () => temporary((directory) => {
   const events = new SecurityEvents(directory, noGeo);
   events.record('suspicious_request', { ip: '45.118.10.5', severity: 'warning',
-    category: 'automated_scanner_probe', outcome: 'observed' });
+    category: 'automated_scanner_probe', outcome: 'observed',
+    request: { method: 'GET', url: '/', headers: {} }, pathname: '/', status: 404 });
   events.record('suspicious_request', { ip: '203.0.113.8', severity: 'critical',
-    category: 'sql_injection_probe', outcome: 'observed' });
+    category: 'sql_injection_probe', outcome: 'origin_rejected',
+    request: { method: 'POST', url: '/login', headers: {} }, pathname: '/login', status: 429 });
   events.record('portal_visit', { ip: '192.168.1.20', severity: 'info', outcome: 'challenge_created' });
   events.geoip = { ...noGeo, lookup(ip) { return ip === '45.118.10.5'
     ? { scope: 'public', country: 'LT', city: 'Vilnius' }
     : ip === '203.0.113.8' ? { scope: 'public', country: 'US' } : { scope: 'private' }; } };
   assert.equal(events.list({ severity: ['warning', 'critical'] }).length, 2);
   assert.equal(events.list({ category: ['automated_scanner_probe'], country: ['LT'] }).length, 1);
+  assert.equal(events.list({ city: ['Vilnius'] }).length, 1);
+  assert.equal(events.list({ method: ['GET'], status: ['404'], disposition: ['observed'] }).length, 1);
+  assert.equal(events.list({ method: ['POST'], status: ['429'], disposition: ['origin_rejected'] }).length, 1);
   assert.equal(events.list({ source: ['45.118.10.0/24'] })[0].source.city, 'Vilnius');
   assert.equal(events.list({ source: ['203.0.113.8'] }).length, 1);
   assert.throws(() => events.list({ source: ['45.118.10.0/99'] }), /Invalid source filter/);
   assert.throws(() => events.list({ country: ['Lithuania'] }), /Invalid country filter/);
+  assert.throws(() => events.list({ city: [''] }), /Invalid city/);
+  assert.throws(() => events.list({ method: ['GET /'] }), /Invalid method/);
+  assert.throws(() => events.list({ status: ['999'] }), /Invalid status/);
+  assert.throws(() => events.list({ disposition: ['bad value'] }), /Invalid disposition/);
   const summary = events.summary();
   assert.deepEqual(summary.filterOptions.countries, [{ country: 'LT', count: 1 }, { country: 'US', count: 1 }]);
   assert.ok(summary.filterOptions.categories.includes('automated_scanner_probe'));
@@ -232,18 +300,48 @@ test('authenticated Scene Management exposes summary and redacted events', async
     assert.doesNotMatch(JSON.stringify(body), /private@example\.com/);
     const summary = JSON.parse((await invoke(handler, '/api/security/summary', { 'x-scene-admin': 'owner' })).body);
     assert.equal(summary.accessRequests, 1);
+    const retainedSummary = await invoke(handler, '/api/security/summary?since=all', { 'x-scene-admin': 'owner' });
+    assert.equal(retainedSummary.status, 200);
+    assert.equal(JSON.parse(retainedSummary.body).windowHours, null);
     const map = await invoke(handler, '/api/security/map', { 'x-scene-admin': 'owner' });
     assert.equal(map.status, 200);
     assert.equal(JSON.parse(map.body).total, 1);
+    const retainedMap = await invoke(handler, '/api/security/map?since=all', { 'x-scene-admin': 'owner' });
+    assert.equal(retainedMap.status, 200);
+    assert.equal(JSON.parse(retainedMap.body).windowHours, null);
+    const globeClient = await invoke(handler, '/security-globe.js', { 'x-scene-admin': 'owner' });
+    assert.equal(globeClient.status, 200);
+    assert.match(String(globeClient.body), /SecurityGlobe/);
+    const worldLand = await invoke(handler, '/world-land-50m.json', { 'x-scene-admin': 'owner' });
+    assert.equal(worldLand.status, 200);
+    assert.equal(JSON.parse(worldLand.body).type, 'Topology');
+    assert.equal(worldLand.headers['Cache-Control'], 'private, max-age=31536000, immutable');
+    assert.equal(Number(worldLand.headers['Content-Length']), worldLand.body.length);
+    assert.match(worldLand.headers.ETag, /^"[A-Za-z0-9_-]{43}"$/);
+    const cityLights = await invoke(handler, '/nasa-city-lights.json', { 'x-scene-admin': 'owner' });
+    assert.equal(cityLights.status, 200);
+    assert.ok(JSON.parse(cityLights.body).points.length > 2000);
+    const dayTexture = await invoke(handler, '/nasa-blue-marble-day.webp', { 'x-scene-admin': 'owner' });
+    assert.equal(dayTexture.status, 200);
+    assert.ok(dayTexture.body.length > 500000);
+    assert.equal(dayTexture.headers['Cache-Control'], 'private, max-age=31536000, immutable');
+    assert.equal(Number(dayTexture.headers['Content-Length']), dayTexture.body.length);
+    const nightTexture = await invoke(handler, '/nasa-black-marble-night.webp', { 'x-scene-admin': 'owner' });
+    assert.equal(nightTexture.status, 200);
+    assert.ok(nightTexture.body.length > 150000);
+    assert.equal(nightTexture.headers['Cache-Control'], 'private, max-age=31536000, immutable');
+    assert.equal(Number(nightTexture.headers['Content-Length']), nightTexture.body.length);
     const maxmind = JSON.parse((await invoke(handler, '/api/security/maxmind', { 'x-scene-admin': 'owner' })).body);
     assert.equal(maxmind.mode, 'scene-management');
     assert.equal(maxmind.configured, false);
     assert.equal(maxmind.accountHint, null);
-    const filtered = await invoke(handler, '/api/security/events?severity=info&severity=warning&source=203.0.113.0%2F24', { 'x-scene-admin': 'owner' });
+    const filtered = await invoke(handler, '/api/security/events?severity=info&severity=warning&source=203.0.113.0%2F24&disposition=accepted', { 'x-scene-admin': 'owner' });
     assert.equal(filtered.status, 200);
     assert.equal(JSON.parse(filtered.body).events.length, 1);
     const invalid = await invoke(handler, '/api/security/events?source=203.0.113.0%2F99', { 'x-scene-admin': 'owner' });
     assert.equal(invalid.status, 400);
+    const invalidCursor = await invoke(handler, '/api/security/events?before=not-a-date', { 'x-scene-admin': 'owner' });
+    assert.equal(invalidCursor.status, 400);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

@@ -5,6 +5,7 @@ repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 "$repository_root/scripts/verify-build-inputs.sh"
 "$repository_root/scripts/prepare-workspace-assets.sh"
+node "$repository_root/scripts/check-application-contracts.js"
 
 for source_file in "$repository_root"/backend/src/*.js; do
   node --check "$source_file"

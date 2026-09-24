@@ -64,10 +64,12 @@ services:
 
 The backend validates and re-signs normalized findings into its bounded
 security ledger. Scene Management shows the target, sanitized path, CRS rule
-IDs, anomaly score, and whether the request passed, was rejected or rate
-limited by the origin, or was blocked at the edge. The WAF mode is display-only:
-enforcement changes remain reviewed deployment operations rather
-than browser-controlled mutations.
+IDs, anomaly score, and audit-reported status class. A ModSecurity audit
+`response.http_code` is not assumed to be the final client response: it is
+labeled `WAF audit HTTP` and remains unverified until correlated with the edge
+access record. A true ModSecurity interruption is a verified edge outcome. The
+WAF mode is display-only: enforcement changes remain reviewed deployment
+operations rather than browser-controlled mutations.
 
 Telegram groups findings by source fingerprint, target, and attack category.
 The first qualifying incident alerts immediately; duplicates accumulate and
@@ -96,3 +98,9 @@ WebSocket, upload, and private-service traffic. Review matched rule IDs and
 false positives, add the narrowest justified exclusions, then enable
 high-confidence denials incrementally. The tracked telemetry sidecar is the
 sanitized audit-to-alert adapter; raw audits never enter Telegram.
+
+Every application inherits the WAF policy through `../applications.json`.
+An exception must name exact CRS rule IDs, an exact path, bounded methods, a
+rationale, and a review date; wildcard bypasses fail validation. Exercise the
+application's declared anonymous, authenticated, QR, Authentik, media, and
+negative journeys before promoting an exclusion or enforcement change.

@@ -20,7 +20,7 @@ const { DestinationRegistry } = require('./scene-destinations');
 const { getFirewallRegistration } = require('./firewall-registration');
 const { ArcadeLeaderboard } = require('./arcade-leaderboard');
 const { GeoIpLookup } = require('./geoip');
-const { createHostPolicy } = require('./host-policy');
+const { createHostPolicy, matchesRequestOrigin } = require('./host-policy');
 const { MaxMindSetup } = require('./maxmind-setup');
 const { SecurityEvents, sourceIp } = require('./security-events');
 const { TelegramAlerts } = require('./telegram-alerts');
@@ -30,6 +30,7 @@ const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const ADMIN_PORT = process.env.ADMIN_PORT ? Number.parseInt(process.env.ADMIN_PORT, 10) : null;
 const ORIGIN = (process.env.PUBLIC_ORIGIN || 'http://localhost:8080').replace(/\/$/, '');
 const allowedHost = createHostPolicy(ORIGIN, process.env.PUBLIC_HOST_ALIASES);
+function sameOrigin(req) { return matchesRequestOrigin(req.headers.origin, ORIGIN, allowedHost); }
 const FIREWALL_ORIGIN = (process.env.FIREWALL_ORIGIN || 'http://localhost:8080').replace(/\/$/, '');
 const MANAGEMENT_SOURCE_IP = process.env.MANAGEMENT_SOURCE_IP || '127.0.0.1';
 const CHALLENGE_TTL = 15 * 60 * 1000;
@@ -119,6 +120,7 @@ function requestDestination(token) {
 
 function cookie(req, name) { return (req.headers.cookie || '').split(';').map((x) => x.trim()).find((x) => x.startsWith(`${name}=`))?.slice(name.length + 1) || ''; }
 function browser(req) { const old = cookie(req, 'portal_browser'); if (/^[A-Za-z0-9_-]{43}$/.test(old)) return [old, null]; const value = crypto.randomBytes(32).toString('base64url'); return [value, `portal_browser=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`]; }
+function portalChallengeCookie(token) { return `portal_challenge=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`; }
 function currentChallenge(req) {
   const token = cookie(req, 'portal_challenge');
   const browserId = cookie(req, 'portal_browser');
@@ -243,7 +245,7 @@ async function handleRequest(req, res) {
     catch (_) { return send(res, 400, { 'Content-Type': 'application/json; charset=utf-8' }, '{"board":[]}'); }
   }
   if (url.pathname === '/api/arcade/scores' && req.method === 'POST') {
-    if (req.headers.origin !== ORIGIN) return send(res, 403, {}, '');
+    if (!sameOrigin(req)) return send(res, 403, {}, '');
     const sourceIp = ip(req);
     if (!store.allowAttempt(sourceIp, 'arcade-score:' + sourceIp, 12, 12)) return send(res, 429, {}, '');
     try { const result = arcadeLeaderboard.submit(await readJson(req)); return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8' }, JSON.stringify(result)); }
@@ -256,7 +258,7 @@ async function handleRequest(req, res) {
     const publicScene = sceneStore.active().scene;
     if (!firewallActive()) publicScene.hotspots = publicScene.hotspots.filter((item) => item.destinationId !== 'firewall');
     const body = landingPage(null, null, nonce, publicScene, backgrounds());
-    const challengeCookie = `portal_challenge=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`;
+    const challengeCookie = portalChallengeCookie(token);
     if (req.method === 'GET') security('portal_visit', req, url, { outcome: 'challenge_created', status: 200, destination: 'torrentharbor' });
     return send(res, 200, { 'Content-Security-Policy': `default-src 'none'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'self' ${FIREWALL_ORIGIN}; frame-ancestors 'none'`, 'Referrer-Policy': 'strict-origin', 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': browserCookie ? [browserCookie, challengeCookie] : challengeCookie }, req.method === 'HEAD' ? '' : body);
   }
@@ -273,9 +275,16 @@ async function handleRequest(req, res) {
     url.pathname = '/challenge/' + token;
   }
   if (url.pathname === '/api/scene/hit' && req.method === 'POST') {
-    if (req.headers.origin !== ORIGIN) return send(res, 403, {}, '');
-    const [token, challenge] = currentChallenge(req);
-    if (!challenge || challenge.status !== 'pending' || Date.parse(challenge.expiresAt) <= Date.now()) return send(res, 404, {}, '');
+    if (!sameOrigin(req)) return send(res, 403, {}, '');
+    let [token, challenge] = currentChallenge(req);
+    const renewalCookies = [];
+    if (!challenge || challenge.status !== 'pending' || Date.parse(challenge.expiresAt) <= Date.now()) {
+      const [browserId, browserCookie] = browser(req);
+      token = store.createChallenge(tokenHash(browserId), Date.now() + CHALLENGE_TTL);
+      challenge = store.getChallenge(token, tokenHash(browserId));
+      if (browserCookie) renewalCookies.push(browserCookie);
+      renewalCookies.push(portalChallengeCookie(token));
+    }
     let point;
     try { point = await readJson(req); } catch (_) { return send(res, 400, {}, ''); }
     const active = sceneStore.active();
@@ -285,11 +294,15 @@ async function handleRequest(req, res) {
     session.progress = result.progress;
     if (result.destination && needsSequence(active.scene, result.destination)) session.unlocks.add(result.destination);
     const destination = result.destination;
-    return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8' }, JSON.stringify({ destination }));
+    const accepted = Boolean(destination || result.progress);
+    const acceptedStep = result.progress ? result.progress.next : (destination ? 'complete' : 0);
+    return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8',
+      ...(renewalCookies.length ? { 'Set-Cookie': renewalCookies } : {}) },
+    JSON.stringify({ destination, accepted, acceptedStep }));
   }
   if (url.pathname === '/api/challenge/firewall' && req.method === 'POST') {
     if (!firewallActive()) return send(res, 404, {}, '');
-    if (req.headers.origin !== ORIGIN) return send(res, 403, {}, '');
+    if (!sameOrigin(req)) return send(res, 403, {}, '');
     const [pageToken, pageChallenge] = currentChallenge(req);
     if (needsSequence(sceneStore.active().scene, 'firewall') &&
         (!pageChallenge || pageChallenge.status !== 'pending' ||
@@ -311,7 +324,7 @@ async function handleRequest(req, res) {
   if (registration && ['GET', 'POST'].includes(req.method)) {
     if (!firewallRegistration.preview(registration[1])) return neutral(res, 404);
     if (req.method === 'POST') {
-      if (req.headers.origin !== ORIGIN) return neutral(res, 403);
+      if (!sameOrigin(req)) return neutral(res, 403);
       try { await firewallRegistration.confirm(registration[1]); return send(res, 200, { 'Content-Type': 'text/html; charset=utf-8' }, confirmedPage()); }
       catch (_) { return neutral(res, 404); }
     }
@@ -395,7 +408,7 @@ async function handleRequest(req, res) {
     return send(res, 200, { 'Content-Type': 'application/json' }, '{}');
   }
   if (url.pathname === '/internal/firewall-handoff' && req.method === 'POST') {
-    if (!firewallActive() || req.headers.origin !== ORIGIN
+    if (!firewallActive() || !sameOrigin(req)
       || req.headers['x-portal-handoff'] !== 'firewall-v1'
       || String(req.headers['content-type'] || '').toLowerCase().split(';')[0].trim() !== 'application/x-www-form-urlencoded')
       return send(res, 403, {}, '');

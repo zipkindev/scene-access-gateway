@@ -26,6 +26,9 @@ function validate(value) {
     || !['info', 'warning', 'critical'].includes(value.severity)
     || !CATEGORIES.has(value.category) || !DISPOSITIONS.has(value.outcome)
     || !value.http || typeof value.http !== 'object' || !value.edge || typeof value.edge !== 'object'
+    || value.http.statusSource !== undefined && value.http.statusSource !== 'modsecurity_audit'
+    || value.edge.statusVerified !== undefined && typeof value.edge.statusVerified !== 'boolean'
+    || value.edge.statusVerified === true && value.edge.interrupted !== true
     || !Number.isFinite(Date.parse(value.at || '')) || Date.parse(value.at) > Date.now() + 5 * 60 * 1000
     || typeof value.sourceIp !== 'string' || value.sourceIp.length > 64
     || value.transactionId !== null && !/^[A-Za-z0-9_-]{1,128}$/.test(value.transactionId || '')) {

@@ -19,6 +19,9 @@ Docker build; the ignored host-side copy needed by unit tests is prepared by
 | `management.js` and `scene-admin*` | Authenticated Scene Management APIs and UI |
 | `scene-*` modules | Scene validation, framing, assets, motion, destinations, and games |
 | `security-events.js` and `login-telemetry.js` | Bounded, ordered security records and privacy-preserving identity fingerprints |
+| `waf-collector.js` and `waf-ingestor.js` | Sanitized ModSecurity findings with explicit audit-status provenance; only WAF interruptions are final-status verified |
+| `source-intelligence*.js` | Cached passive evidence orchestration and the isolated, token-authenticated egress worker |
+| `application-contracts.js` | Fail-closed validation for routes, identity/QR behavior, proxy rules, browser sources, WAF exceptions, and acceptance journeys |
 | `allowlist.js`, `assertion.js`, and registration modules | Destination authorization and short-lived access handoff |
 | `store.js` | Durable portal state with strict startup and migration behavior |
 
@@ -41,6 +44,12 @@ appended, and graceful shutdown drains the writer before exit.
 TorrentHarbor management authorization uses the direct TCP peer address on the
 private backend network. Do not publish that backend port or substitute a
 client-controlled forwarding header for this boundary.
+
+The tracked deployment inventory is `deploy/applications.json`. Adding an app
+requires a complete contract rather than a proxy-only change. Wildcard browser
+origins and WAF paths are rejected; any WAF exclusion needs exact rule IDs,
+path, methods, rationale, and review date. Apps using QR or Authentik relay
+must keep those journeys in their verification set.
 
 ## Validate
 

@@ -25,4 +25,15 @@ function createHostPolicy(origin, aliases = '') {
   };
 }
 
-module.exports = { configuredAliases, createHostPolicy };
+function matchesRequestOrigin(originHeader, publicOrigin, allowedHost) {
+  if (typeof originHeader !== 'string' || typeof allowedHost !== 'function') return false;
+  try {
+    const publicUrl = new URL(publicOrigin);
+    const supplied = new URL(originHeader);
+    return supplied.href === supplied.origin + '/'
+      && supplied.protocol === publicUrl.protocol
+      && allowedHost(supplied.host);
+  } catch (_) { return false; }
+}
+
+module.exports = { configuredAliases, createHostPolicy, matchesRequestOrigin };

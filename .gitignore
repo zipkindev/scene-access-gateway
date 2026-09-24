@@ -5,6 +5,12 @@
 .local.*/
 node_modules/
 backend/src/assets/
+!backend/src/assets/
+backend/src/assets/*
+!backend/src/assets/map/
+backend/src/assets/map/*
+!backend/src/assets/map/world-land-110m.json
+!backend/src/assets/map/world-atlas-LICENSE
 backend/src/audio-samples/
 frontend/artwork/audio/*.mp3
 coverage/

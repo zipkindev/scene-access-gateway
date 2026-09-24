@@ -41,7 +41,9 @@ Scene Management is a browser-based authoring workspace, not a collection of
 hard-coded image maps. An administrator can choose and optimize artwork,
 define TV and phone framing, place destination hotspots, require an ordered
 sequence of up to ten clicks, preview the QR position, save drafts, publish, and
-restore earlier revisions.
+restore earlier revisions. A per-scene click debugger can temporarily show
+browser-to-server click receipts for troubleshooting; it is off by default and
+does not change the hotspot sequence.
 
 ![Scene Management configuring a four-point ordered QR activation](docs/media/scene-management-sequence.png)
 
@@ -72,6 +74,12 @@ source address. MaxMind onboarding, database downloads, update status, and
 credential removal are managed from the same protected console. See
 [security monitoring](docs/security-monitoring.md).
 
+![Scene Management passive source intelligence with sanitized RFC-reserved evidence](docs/media/scene-management-source-intelligence.png)
+
+Selecting a source can open a passive assessment combining ledger evidence,
+local GeoIP, RDAP ownership, reverse DNS, and routing context. The unexposed
+worker has no portal-state mount and active checks remain disabled by default.
+
 ## Highlights
 
 - **Interactive portal:** zoomable and pannable scenes, motion layers,
@@ -79,7 +87,7 @@ credential removal are managed from the same protected console. See
   support, and optional scene interactions.
 - **Visual scene editor:** background and image management, framing profiles,
   hotspot placement, ordered unlock sequences, scene-specific browser titles,
-  previews, drafts, publishing, and revision history.
+  opt-in click diagnostics, previews, drafts, publishing, and revision history.
 - **Arcade continuity:** resumable local play, persistent ranked scoreboards
   across thirteen game profiles, guarded score submission, and extension-side
   Wolf/Spear competition contracts.
@@ -126,6 +134,8 @@ flowchart LR
     Backend --> Security[(Bounded security-event ledger)]
     Backend --> Mail[SMTP confirmation]
     Backend --> Authentik[Authentik identity API]
+    Backend -->|authenticated request| Recon[Isolated source-intelligence worker]
+    Recon -->|constrained egress| Registries[RDAP, DNS, and routing sources]
     Authentik --> Postgres[(Private PostgreSQL)]
     Security --> Editor
     Extension[Optional extensions] -. read-only mount .-> Backend
@@ -133,7 +143,7 @@ flowchart LR
     classDef public fill:#dbeafe,stroke:#2563eb,color:#111827
     classDef private fill:#ecfdf5,stroke:#059669,color:#111827
     class Visitor,WAF public
-    class Editor,Gateway,Backend,State,Security,Mail,Authentik,Postgres,Services,Extension,WafAudit private
+    class Editor,Gateway,Backend,State,Security,Mail,Authentik,Postgres,Services,Extension,WafAudit,Recon private
 ```
 
 The portable default exposes only loopback development listeners. The optional
@@ -149,7 +159,10 @@ are layers of one WAF service, not separate WAF containers. The private
 provides the application and Scene Management. Two certificate reloaders cover
 the public and origin Nginx processes. A sixth, networkless `waf-telemetry`
 service continuously reads the raw audit mount read-only and writes only
-bounded normalized findings for the portal to ingest.
+bounded normalized findings for the portal to ingest. The seventh,
+`source-intelligence`, is an unexposed token-authenticated helper with narrow
+egress for passive RDAP, reverse-DNS, and routing evidence; active checks are
+disabled unless the operator explicitly enables and confirms them.
 
 The normalizer removes headers, bodies, query values, cookies, authorization
 data, and uploads. Transaction identifiers that do not meet the ledger's
@@ -161,14 +174,14 @@ aggregated and sustained incidents can produce bounded reminders according to
 the Scene Management policy.
 
 Finding severity is derived from the matched CRS rule severity and
-high-confidence attack category, not from the origin response code. In the UI
-and Telegram, `Observed only (DetectionOnly; not blocked)` means the WAF logged
-the request and forwarded it. An origin `2xx` shows only that the routed HTTP
-request received a success-class response; it does not establish that the
-scanner authenticated, reached an administrative function, or exploited the
-application. Normalized findings include a safe CRS rule explanation plus the
-sanitized method, path, status, action, and WAF mode without retaining request
-headers, query values, or bodies.
+high-confidence attack category, not from a response code. In the UI and
+Telegram, audit status is labeled `WAF audit HTTP` until it is correlated with
+the edge access record. A non-interrupted audit `2xx` does not prove that the
+client received a success response, authenticated, reached an administrative
+function, or exploited the application. A true WAF interruption is the only
+audit outcome marked verified. Normalized findings include a safe CRS rule
+explanation plus the sanitized method, path, audit status, action, and WAF mode
+without retaining request headers, query values, or bodies.
 
 Start an internet-facing rollout with `MODSEC_RULE_ENGINE=DetectionOnly` and
 retain application/origin enforcement. Use a one-week observation window to
@@ -186,6 +199,14 @@ same names, while unknown hosts, arbitrary ports, credentials, and path-shaped
 Host values continue to fail closed.
 
 More detail is available in the [architecture notes](docs/architecture/README.md).
+
+Every protected application is declared in
+[`deploy/applications.json`](deploy/applications.json). The contract makes its
+route/host mode, private origin variables, Authentik and QR behavior, proxy
+rules, external CSP sources, WAF policy, exception rationale, and acceptance
+journeys reviewable together. `scripts/check-application-contracts.js` fails
+closed on wildcard or undocumented exceptions and runs as part of the normal
+test gate.
 
 The public Platform repository pins a tested Gateway commit together with a
 tested optional Wolf extension commit. It does not copy this repository's

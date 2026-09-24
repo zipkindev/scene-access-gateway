@@ -37,6 +37,13 @@ The portable edge emits a one-day HSTS starter policy, which browsers ignore
 over local HTTP. Preserve it at TLS termination, then lengthen it only after
 certificate renewal and every covered hostname are verified.
 
+Application proxy behavior is reviewed through `deploy/applications.json`.
+External image or frame origins are permitted only when the application
+contract names the exact HTTPS origin and functional rationale. TorrentHarbor,
+for example, requires exact TMDB artwork, YouTube thumbnail, and
+privacy-enhanced trailer-frame sources; those exceptions do not broaden the
+portal's default policy or authorize wildcard origins.
+
 Build and route validation run through `../scripts/build.sh` and
 `../scripts/smoke-test.sh`; the Platform root adds the optional extension
 overlay and combined smoke checks.

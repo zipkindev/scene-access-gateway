@@ -15,6 +15,7 @@ const { FIREWALL_PUBLIC } = require('./destination-plan');
 const { GeoIpLookup } = require('./geoip');
 const { MaxMindSetup } = require('./maxmind-setup');
 const { SecurityEvents, sourceIp } = require('./security-events');
+const { SourceIntelligence } = require('./source-intelligence');
 const { TelegramAlerts } = require('./telegram-alerts');
 
 const ADMIN_ORIGIN = (process.env.ADMIN_ORIGIN || 'http://localhost:8081').replace(/\/$/, '');
@@ -22,6 +23,11 @@ const ADMIN_ORIGIN = (process.env.ADMIN_ORIGIN || 'http://localhost:8081').repla
 // every interaction leaves at least twelve hours before cookie expiry.
 const EDITOR_SESSION_SECONDS = (12 * 60 * 60) + (15 * 60);
 const CLIENT = fs.readFileSync(path.join(__dirname, 'scene-admin-client.js'));
+const SECURITY_GLOBE_CLIENT = fs.readFileSync(path.join(__dirname, 'security-globe.js'));
+const WORLD_LAND = fs.readFileSync(path.join(__dirname, 'assets', 'map', 'world-land-50m.json'));
+const CITY_LIGHTS = fs.readFileSync(path.join(__dirname, 'assets', 'map', 'nasa-city-lights.json'));
+const BLUE_MARBLE_DAY = fs.readFileSync(path.join(__dirname, 'assets', 'map', 'nasa-blue-marble-day.webp'));
+const BLACK_MARBLE_NIGHT = fs.readFileSync(path.join(__dirname, 'assets', 'map', 'nasa-black-marble-night.webp'));
 const MOTION_CLIENT = fs.readFileSync(path.join(__dirname, 'scene-motion-renderer.js'));
 const FRAMING_CLIENT = fs.readFileSync(path.join(__dirname, 'scene-framing.js'));
 const GAME_CLIENT = fs.readFileSync(path.join(__dirname, 'scene-game.js'));
@@ -33,6 +39,19 @@ const ASSETS = new Map(Object.values(BACKGROUNDS).map((item) => [
   '/assets/' + item.file,
   { body: fs.readFileSync(path.join(__dirname, 'assets', item.file)), mediaType: item.mediaType },
 ]));
+const IMMUTABLE_PRIVATE_CACHE = 'private, max-age=31536000, immutable';
+
+function cachedAssetHeaders(contentType, body) {
+  return {
+    'Content-Type': contentType,
+    'Content-Length': String(body.length),
+    'Cache-Control': IMMUTABLE_PRIVATE_CACHE,
+    ETag: `"${crypto.createHash('sha256').update(body).digest('base64url')}"`,
+  };
+}
+const WORLD_LAND_HEADERS = cachedAssetHeaders('application/json; charset=utf-8', WORLD_LAND);
+const BLUE_MARBLE_DAY_HEADERS = cachedAssetHeaders('image/webp', BLUE_MARBLE_DAY);
+const BLACK_MARBLE_NIGHT_HEADERS = cachedAssetHeaders('image/webp', BLACK_MARBLE_NIGHT);
 for (const file of ['clouds-upper.png', 'fog-near.png', 'rain.png', 'water-reflections.png']) {
   ASSETS.set('/motion/immersive-city-candidate-a/' + file, {
     body: fs.readFileSync(path.join(__dirname, 'assets', 'motion', 'immersive-city-candidate-a', file)), mediaType: 'image/png',
@@ -135,7 +154,8 @@ function readImage(request) {
   });
 }
 
-function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTelegramAlerts = null, suppliedMaxMindSetup = null) {
+function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTelegramAlerts = null, suppliedMaxMindSetup = null,
+  suppliedSourceIntelligence = null) {
   const images = new ImageLibrary(directory);
   const destinations = new DestinationRegistry(directory);
   function firewallProvisioningReceipt() {
@@ -164,6 +184,7 @@ function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTele
   const securityEvents = suppliedSecurityEvents || new SecurityEvents(directory, geoIp);
   const maxMindSetup = suppliedMaxMindSetup || new MaxMindSetup(directory, geoIp);
   const telegramAlerts = suppliedTelegramAlerts || new TelegramAlerts(directory);
+  const sourceIntelligence = suppliedSourceIntelligence || new SourceIntelligence(directory, securityEvents, geoIp);
   const directoryApi = createDestinationDirectory();
   const backgrounds = () => ({ ...BACKGROUNDS, ...images.catalog() });
   const activeDestinations = () => ['torrentharbor', ...destinations.list().filter((item) => item.status === 'active').map((item) => item.id)];
@@ -194,6 +215,21 @@ function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTele
     }
     if (url.pathname === '/admin.js' && ['GET', 'HEAD'].includes(request.method)) {
       return send(response, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, request.method === 'HEAD' ? '' : CLIENT);
+    }
+    if (url.pathname === '/security-globe.js' && ['GET', 'HEAD'].includes(request.method)) {
+      return send(response, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, request.method === 'HEAD' ? '' : SECURITY_GLOBE_CLIENT);
+    }
+    if (url.pathname === '/world-land-50m.json' && ['GET', 'HEAD'].includes(request.method)) {
+      return send(response, 200, WORLD_LAND_HEADERS, request.method === 'HEAD' ? '' : WORLD_LAND);
+    }
+    if (url.pathname === '/nasa-city-lights.json' && ['GET', 'HEAD'].includes(request.method)) {
+      return send(response, 200, { 'Content-Type': 'application/json; charset=utf-8' }, request.method === 'HEAD' ? '' : CITY_LIGHTS);
+    }
+    if (url.pathname === '/nasa-blue-marble-day.webp' && ['GET', 'HEAD'].includes(request.method)) {
+      return send(response, 200, BLUE_MARBLE_DAY_HEADERS, request.method === 'HEAD' ? '' : BLUE_MARBLE_DAY);
+    }
+    if (url.pathname === '/nasa-black-marble-night.webp' && ['GET', 'HEAD'].includes(request.method)) {
+      return send(response, 200, BLACK_MARBLE_NIGHT_HEADERS, request.method === 'HEAD' ? '' : BLACK_MARBLE_NIGHT);
     }
     if (url.pathname === '/scene-motion.js' && ['GET', 'HEAD'].includes(request.method)) {
       return send(response, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }, request.method === 'HEAD' ? '' : MOTION_CLIENT);
@@ -264,30 +300,67 @@ function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTele
       });
     }
     if (url.pathname === '/api/security/summary' && request.method === 'GET') {
-      return json(response, 200, securityEvents.summary());
+      const since = url.searchParams.get('since');
+      if ([...url.searchParams.keys()].some((key) => key !== 'since')
+        || url.searchParams.getAll('since').length > 1) return json(response, 400, { error: 'Invalid security-summary query' });
+      return json(response, 200, securityEvents.summary({ since: since || undefined }));
     }
     if (url.pathname === '/api/security/map' && request.method === 'GET') {
-      return json(response, 200, securityEvents.map());
+      const since = url.searchParams.get('since');
+      if ([...url.searchParams.keys()].some((key) => key !== 'since')
+        || url.searchParams.getAll('since').length > 1) return json(response, 400, { error: 'Invalid security-map query' });
+      return json(response, 200, securityEvents.map({ since: since || undefined }));
     }
     if (url.pathname === '/api/security/events' && request.method === 'GET') {
       const keys = [...url.searchParams.keys()];
-      if (keys.some((key) => !['limit', 'stream', 'severity', 'type', 'category', 'country', 'source', 'since'].includes(key))
-        || ['limit', 'since'].some((key) => url.searchParams.getAll(key).length > 1)) {
+      if (keys.some((key) => !['limit', 'stream', 'severity', 'type', 'category', 'country', 'city', 'source', 'method', 'status', 'disposition', 'since', 'before'].includes(key))
+        || ['limit', 'since', 'before'].some((key) => url.searchParams.getAll(key).length > 1)) {
         return json(response, 400, { error: 'Invalid security-event query' });
       }
       try {
         const filters = {
-          limit: url.searchParams.get('limit'), since: url.searchParams.get('since'),
+          limit: url.searchParams.get('limit'), since: url.searchParams.get('since'), before: url.searchParams.get('before'),
           stream: url.searchParams.getAll('stream'),
           severity: url.searchParams.getAll('severity'), type: url.searchParams.getAll('type'),
           category: url.searchParams.getAll('category'), country: url.searchParams.getAll('country'),
+          city: url.searchParams.getAll('city'),
+          method: url.searchParams.getAll('method'), status: url.searchParams.getAll('status'),
+          disposition: url.searchParams.getAll('disposition'),
           source: url.searchParams.getAll('source'),
         };
         return json(response, 200, {
-          events: securityEvents.list(filters),
+          ...securityEvents.page(filters),
           filterOptions: securityEvents.filterOptions(filters),
         });
       } catch (_) { return json(response, 400, { error: 'Invalid security-event query' }); }
+    }
+    if (url.pathname === '/api/security/source-intelligence' && request.method === 'GET') {
+      if ([...url.searchParams.keys()].some((key) => key !== 'ip') || url.searchParams.getAll('ip').length !== 1) {
+        return json(response, 400, { error: 'Select one public source IP' });
+      }
+      try { return json(response, 200, sourceIntelligence.status(url.searchParams.get('ip'))); }
+      catch (error) { return json(response, error.status || 400, { error: error.message }); }
+    }
+    if (url.pathname === '/api/security/source-intelligence' && request.method === 'POST') {
+      if (!csrf(request)) return csrfFailure(request, response);
+      try {
+        const body = await readJson(request);
+        if (Object.keys(body).some((key) => !['ip', 'active', 'acknowledgement'].includes(key))
+          || typeof body.active !== 'boolean') throw Object.assign(new Error('Invalid investigation request'), { status: 400 });
+        const result = await sourceIntelligence.investigate(body.ip, {
+          active: body.active, acknowledgement: body.acknowledgement, actor: administrator.username,
+        });
+        securityEvents.record('admin_action', { request, pathname: url.pathname, ip: sourceIp(request),
+          identity: administrator.username, outcome: 'success',
+          reason: body.active ? 'source_active_recon_completed' : 'source_passive_investigation_completed', status: 200 });
+        return json(response, 200, result);
+      } catch (error) {
+        const allowed = new Set(['Invalid investigation request', 'Select one public source IP',
+          'The protected destination cannot be investigated', 'Another source investigation is already running',
+          'Ethical reconnaissance is disabled by server policy', 'Active reconnaissance acknowledgement is required',
+          'Active reconnaissance is limited to once per IP every 24 hours']);
+        return json(response, error.status || 500, { error: allowed.has(error.message) ? error.message : 'Source investigation failed' });
+      }
     }
     if (url.pathname === '/api/security/maxmind' && request.method === 'GET') {
       return json(response, 200, maxMindSetup.state());

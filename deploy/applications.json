@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "applications": [
+    {
+      "id": "portal",
+      "public": { "mode": "path", "route": "/", "originEnvironment": "PUBLIC_ORIGIN" },
+      "upstream": { "kind": "local-service", "service": "access-portal" },
+      "access": { "portalSession": false, "authentikRelay": false, "qrDestination": false },
+      "proxy": { "preservePrefix": true, "originPolicy": "same-origin", "hostPolicy": "public-host" },
+      "browserPolicy": { "externalSources": [] },
+      "waf": { "policy": "inherit", "exclusions": [] },
+      "verification": ["anonymous-entry", "negative-sensitive-path", "health", "security-headers"]
+    },
+    {
+      "id": "torrentharbor",
+      "public": { "mode": "path", "route": "/torrentharbor/", "originEnvironment": "PUBLIC_ORIGIN" },
+      "upstream": {
+        "kind": "tls-origin",
+        "addressEnvironment": "TORRENTHARBOR_UPSTREAM",
+        "tlsNameEnvironment": "TORRENTHARBOR_TLS_NAME"
+      },
+      "access": {
+        "portalSession": true,
+        "authentikRelay": true,
+        "authentikGroup": "app:torrentharbor",
+        "qrDestination": true,
+        "assertionAudience": "torrentharbor"
+      },
+      "proxy": {
+        "preservePrefix": true,
+        "originPolicy": "rewrite-to-upstream",
+        "hostPolicy": "trusted-internal-host",
+        "allowedCookiePrefixes": ["th_session"]
+      },
+      "browserPolicy": {
+        "externalSources": [
+          { "directive": "img-src", "origin": "https://image.tmdb.org", "reason": "TMDB poster, backdrop, and cast artwork" },
+          { "directive": "img-src", "origin": "https://i.ytimg.com", "reason": "YouTube trailer thumbnails" },
+          { "directive": "frame-src", "origin": "https://www.youtube-nocookie.com", "reason": "Privacy-enhanced embedded trailer playback" }
+        ]
+      },
+      "waf": { "policy": "inherit", "exclusions": [] },
+      "verification": [
+        "anonymous-redirect", "authenticated-overview", "authenticated-releases", "authenticated-media",
+        "qr-click-receipt", "authentik-relay", "negative-sensitive-path", "security-headers"
+      ]
+    },
+    {
+      "id": "firewall",
+      "public": { "mode": "host", "originEnvironment": "FIREWALL_ORIGIN" },
+      "upstream": {
+        "kind": "tls-origin",
+        "addressEnvironment": "FIREWALL_UPSTREAM_IP",
+        "urlEnvironment": "FIREWALL_UPSTREAM",
+        "tlsNameEnvironment": "FIREWALL_TLS_NAME"
+      },
+      "access": {
+        "portalSession": true,
+        "authentikRelay": false,
+        "authentikGroup": "app:firewall",
+        "qrDestination": true,
+        "separateApproval": true
+      },
+      "proxy": { "preservePrefix": true, "originPolicy": "rewrite-to-upstream", "hostPolicy": "tls-name" },
+      "browserPolicy": { "externalSources": [] },
+      "waf": { "policy": "inherit", "exclusions": [] },
+      "verification": [
+        "anonymous-redirect", "approved-handoff", "invalid-handoff", "qr-click-receipt",
+        "negative-sensitive-path", "security-headers"
+      ]
+    }
+  ]
+}

@@ -48,6 +48,13 @@ remains separate from source synchronization.
 
 ## Hardened rollout order
 
+Before creating a target overlay for a new application, add and validate its
+entry in `deploy/applications.json`. Implement only the exact host/path,
+upstream/TLS identity, cookie, CSP, Authentik, QR, and WAF behavior declared
+there. Any WAF exclusion requires exact rule IDs, path, methods, rationale, and
+review date. The rollout must exercise every declared journey so later
+hardening cannot silently break an exception-worthy function.
+
 For an internet-facing update, retain the WAF in observation mode, back up the
 portal data volume, retain the previous frontend/backend image IDs under
 rollback tags, validate the merged Compose model, and build the exact source

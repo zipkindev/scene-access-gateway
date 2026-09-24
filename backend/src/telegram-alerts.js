@@ -122,9 +122,9 @@ function maskedSource(source, redaction) {
 
 function dispositionLabel(disposition) {
   return ({
-    observed_passed: 'observed only, not blocked',
-    origin_rejected: 'origin rejected',
-    origin_rate_limited: 'origin rate-limited',
+    observed_passed: 'audit-reported 2xx/3xx',
+    origin_rejected: 'audit-reported 4xx',
+    origin_rate_limited: 'audit-reported 429',
     waf_blocked: 'WAF blocked',
     edge_rejected: 'edge rejected',
     outcome_unknown: 'outcome unknown',
@@ -134,10 +134,12 @@ function dispositionLabel(disposition) {
 function wafAction(event) {
   const disposition = event.edge?.disposition;
   if (disposition === 'observed_passed') return event.edge?.mode === 'DetectionOnly'
-    ? 'Observed only (DetectionOnly); request was not blocked'
-    : 'Observed only; request was not blocked by the WAF';
-  if (disposition === 'origin_rejected') return 'Observed by WAF; origin rejected the request';
-  if (disposition === 'origin_rate_limited') return 'Observed by WAF; origin rate-limited the request';
+    ? 'Observed only (DetectionOnly); WAF did not interrupt the request'
+    : 'Observed only; WAF did not interrupt the request';
+  if (disposition === 'origin_rejected') return event.edge?.statusVerified
+    ? 'Rejected before reaching the origin' : 'WAF audit reported a 4xx; final edge status is unverified';
+  if (disposition === 'origin_rate_limited') return event.edge?.statusVerified
+    ? 'Rate-limited before reaching the origin' : 'WAF audit reported 429; final edge status is unverified';
   if (disposition === 'waf_blocked') return 'Blocked by WAF before reaching the origin';
   if (disposition === 'edge_rejected') return 'Rejected at the edge';
   return 'Outcome could not be determined';
@@ -145,9 +147,10 @@ function wafAction(event) {
 
 function wafMeaning(event) {
   const disposition = event.edge?.disposition;
-  if (disposition === 'observed_passed') return event.http?.status !== null
-    ? `Origin returned HTTP ${event.http.status}; this status alone does not prove access or exploitation.`
-    : 'The request was not blocked; that alone does not prove access or exploitation.';
+  if (event.edge?.statusVerified !== true) return event.http?.status !== null
+    ? `ModSecurity audit reported HTTP ${event.http.status}; correlate the edge access log to determine the final client response.`
+    : 'Correlate the edge access log to determine the final client response.';
+  if (disposition === 'observed_passed') return 'The request was not blocked; that alone does not prove access or exploitation.';
   if (disposition === 'origin_rejected') return 'The application or origin rejected the request.';
   if (disposition === 'origin_rate_limited') return 'The application or origin applied rate limiting.';
   if (disposition === 'waf_blocked') return 'The request did not reach the application origin.';
@@ -376,7 +379,8 @@ class TelegramAlerts {
     const waf = event.type === 'waf_finding' && event.edge;
     const request = waf && event.http?.path
       ? `Request: ${String(event.http.method || '').slice(0, 12)} ${String(event.http.path).slice(0, 512)}`
-        + (event.http.status !== null ? ` → HTTP ${event.http.status}` : '') : null;
+        + (event.http.status !== null ? (event.edge.statusVerified === true
+          ? ` → HTTP ${event.http.status}` : ` → WAF audit HTTP ${event.http.status}`) : '') : null;
     const matched = waf && event.edge.ruleIds?.length
       ? `Matched: CRS ${event.edge.ruleIds.join(', ')}`
         + (event.edge.ruleSummary ? ` · ${event.edge.ruleSummary}` : '') : null;

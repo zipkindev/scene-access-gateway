@@ -56,9 +56,10 @@ function normalizeAudit(value, observedAt = new Date(), historical = false) {
   return {
     version: 1, source: 'waf', transactionId: uniqueId, at,
     severity, category, outcome: disposition, sourceIp,
-    http: { method: String(request.method || '').slice(0, 12), path: safePath(request.uri), status },
+    http: { method: String(request.method || '').slice(0, 12), path: safePath(request.uri), status,
+      statusSource: 'modsecurity_audit' },
     edge: { target, disposition, ruleIds, ruleSummary: ruleSummary(ruleIds), anomalyScore: scores.length ? Math.max(...scores) : null,
-      interrupted, transactionId: uniqueId, historical: historical === true },
+      interrupted, statusVerified: interrupted, transactionId: uniqueId, historical: historical === true },
   };
 }
 

@@ -32,6 +32,7 @@ create_secret() {
 
 create_secret "$secret_root/postgres-password" 36
 create_secret "$secret_root/authentik-secret-key" 60
+create_secret "$secret_root/source-intelligence-token" 36
 
 if [ ! -e "$secret_root/smtp-password" ]; then
   : >"$secret_root/smtp-password"

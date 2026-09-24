@@ -3,9 +3,11 @@
 Copy `.env.example` to `.env` with `scripts/bootstrap.sh`, then review every
 value. The `.env` file is ignored by Git.
 
-The base `compose.yaml` starts only the frontend and backend. It uses a named
-volume for portal state and does not require credentials merely to display the
-local portal and editor.
+The base `compose.yaml` starts the frontend, backend, and isolated
+source-intelligence worker. It uses a named volume for portal state and does
+not require external credentials merely to display the local portal and
+editor. The worker is unexposed, uses a dedicated authentication secret, and
+keeps active investigation disabled by default.
 
 ## Configuration ownership
 
@@ -47,6 +49,18 @@ City and ASN databases in `SAG_GEOIP_DIR` and use `compose.geoip.yaml` instead.
 
 See [security monitoring](../security-monitoring.md) for the trusted-proxy
 requirement, privacy limits, and public-exposure checklist.
+
+Application routing and exceptions are inventoried in
+`deploy/applications.json`; environment-specific values remain in `.env` or an
+ignored deployment overlay. Update the contract and pass
+`scripts/check-application-contracts.js` before adding proxy routes, Authentik
+groups, QR destinations, CSP sources, cookies, or WAF exclusions.
+
+`SAG_SOURCE_INTELLIGENCE_ACTIVE_ENABLED` defaults to `false`. Passive source
+investigations still combine the local event ledger and GeoLite data with
+RDAP, reverse-DNS, and routing evidence through the isolated, unexposed helper.
+Enabling the setting permits only the fixed, explicitly confirmed ethical-
+reconnaissance profile documented in [security monitoring](../security-monitoring.md).
 
 `SAG_MANAGEMENT_SOURCE_IP` identifies the direct TCP peer allowed to use the
 TorrentHarbor management API on the private backend network. Public Nginx

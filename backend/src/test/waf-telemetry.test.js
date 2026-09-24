@@ -20,7 +20,7 @@ test('ModSecurity transaction IDs are retained or converted to stable ledger-saf
   assert.equal(converted, safeTransactionId('transaction.with:modsecurity/characters'));
   assert.notEqual(converted, 'transaction.with:modsecurity/characters');
 });
-const { WafIngestor } = require('../waf-ingestor');
+const { WafIngestor, validate } = require('../waf-ingestor');
 const { SecurityEvents } = require('../security-events');
 
 const noGeo = {
@@ -47,7 +47,9 @@ test('WAF audits normalize into one sanitized high-confidence finding', () => {
   assert.equal(value.severity, 'critical');
   assert.equal(value.http.path, '/.env');
   assert.equal(value.http.status, 404);
+  assert.equal(value.http.statusSource, 'modsecurity_audit');
   assert.equal(value.edge.disposition, 'origin_rejected');
+  assert.equal(value.edge.statusVerified, false);
   assert.deepEqual(value.edge.ruleIds, ['930130']);
   assert.equal(value.edge.ruleSummary, 'Restricted or sensitive file requested');
   assert.equal(value.edge.anomalyScore, 5);
@@ -79,6 +81,18 @@ test('CRS protocol rules retain their own severity and are not promoted by an HT
   assert.equal(restrictedHeader.edge.ruleSummary, 'HTTP header restricted by policy');
 });
 
+test('only a ModSecurity interruption is a verified final edge outcome', () => {
+  const value = normalizeAudit(audit({ is_interrupted: true, response: { http_code: 403 } }));
+  assert.equal(value.edge.disposition, 'waf_blocked');
+  assert.equal(value.edge.statusVerified, true);
+});
+
+test('ingestion rejects telemetry that claims an unverified transaction has a verified status', () => {
+  const value = normalizeAudit(audit());
+  value.edge.statusVerified = true;
+  assert.throws(() => validate(value), /Invalid WAF telemetry event/);
+});
+
 test('collector and ingestor persist, deduplicate, and expose WAF status', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sag-waf-'));
   try {
@@ -104,9 +118,13 @@ test('collector and ingestor persist, deduplicate, and expose WAF status', () =>
     assert.equal(events[0].edge.transactionId, 'edge_request_01');
     assert.equal(events[0].edge.historical, true);
     assert.equal(events[0].edge.mode, 'DetectionOnly');
+    assert.equal(events[0].http.statusSource, 'modsecurity_audit');
+    assert.equal(events[0].edge.statusVerified, false);
     assert.equal(security.list({ stream: 'application' }).length, 0);
     assert.equal(security.list({ stream: 'waf' }).length, 1);
-    assert.deepEqual(security.summary().waf, {
+    // Keep this historical ingestion fixture independent of the wall clock;
+    // the product default intentionally shows only the most recent 24 hours.
+    assert.deepEqual(security.summary({ since: '2026-09-23T00:00:00.000Z' }).waf, {
       total: 1, passed: 0, rejected: 1, rateLimited: 0, blocked: 0,
       ingestion: { ...ingestor.status() },
     });

@@ -98,8 +98,8 @@ test('persistent incidents re-alert after the configured interval and separate t
   await alerts.draining;
   assert.equal(requests.length, 2);
   assert.match(requests[1].text, /total: 3/);
-  assert.match(requests[1].text, /origin rejected 2/);
-  assert.match(requests[1].text, /origin rate-limited 1/);
+  assert.match(requests[1].text, /audit-reported 4xx 2/);
+  assert.match(requests[1].text, /audit-reported 429 1/);
   assert.equal(alerts.enqueue({ ...finding, edge: { ...finding.edge, target: 'arcade.example.invalid' } }), true);
   await alerts.draining;
   assert.equal(requests.length, 3);
@@ -112,16 +112,19 @@ test('WAF Telegram alerts explain observation mode, request result, and safe rul
   alerts.updatePolicy({ ...DEFAULT_POLICY, enabled: true, minimumSeverity: 'warning', countThreshold: 1,
     categories: [...DEFAULT_POLICY.categories, 'protocol_anomaly'] });
   assert.equal(alerts.enqueue(event({ type: 'waf_finding', severity: 'warning', category: 'protocol_anomaly',
-    outcome: 'observed_passed', http: { method: 'GET', path: '/', status: 200 }, edge: {
+    outcome: 'observed_passed', http: { method: 'GET', path: '/', status: 200,
+      statusSource: 'modsecurity_audit' }, edge: {
       target: '75.178.84.162', disposition: 'observed_passed', mode: 'DetectionOnly',
+      statusVerified: false,
       ruleIds: ['920350'], ruleSummary: 'Numeric IP used as the HTTP Host header',
     } })), true);
   await alerts.draining;
   assert.equal(requests.length, 1);
-  assert.match(requests[0].text, /Request: GET \/ → HTTP 200/);
+  assert.match(requests[0].text, /Request: GET \/ → WAF audit HTTP 200/);
   assert.match(requests[0].text, /Matched: CRS 920350 · Numeric IP used as the HTTP Host header/);
-  assert.match(requests[0].text, /WAF action: Observed only \(DetectionOnly\); request was not blocked/);
-  assert.match(requests[0].text, /status alone does not prove access or exploitation/);
+  assert.match(requests[0].text, /WAF action: Observed only \(DetectionOnly\); WAF did not interrupt the request/);
+  assert.match(requests[0].text, /correlate the edge access log to determine the final client response/);
+  assert.doesNotMatch(requests[0].text, /Origin returned/);
   assert.doesNotMatch(requests[0].text, /Outcome: observed_passed|Results: observed passed/);
 }));
 

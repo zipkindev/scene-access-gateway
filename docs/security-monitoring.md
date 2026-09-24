@@ -2,7 +2,8 @@
 
 Scene Access Gateway records application-level security events in a protected,
 rotating JSON Lines ledger under the portal data volume. The authenticated
-Scene Management interface shows a 24-hour summary and the latest 100 events.
+Scene Management interface defaults to a 24-hour summary and pages up to 250
+matching events at a time across configurable retained windows.
 
 This complements, rather than replaces, the reverse-proxy access log,
 Authentik events, firewall telemetry, a WAF, or an intrusion-prevention tool.
@@ -205,6 +206,40 @@ from **Scene Management**, with a readable action such as a MaxMind database
 update or Telegram policy change. They are not displayed as unknown network
 sources.
 
+## Source intelligence and ethical reconnaissance
+
+Selecting one exact public IP exposes **Source intelligence** directly inside
+Security Monitoring. **Investigate source** creates a deterministic case file
+containing retained application/WAF evidence, local GeoLite city and ASN data,
+forward-confirmed reverse DNS, authoritative RDAP allocation data, and RIPEstat
+routing context. Results identify the registered network and likely
+infrastructure class; they do not identify the person responsible for a
+request. Client-supplied headers remain labeled as untrusted observations.
+
+The network helper is not published and is the only service attached to the
+`intelligence-egress` network. The portal backend remains on the internal
+network. Provider destinations and redirects are allowlisted, responses and
+timeouts are bounded, and saved case files use mode `0600` under the protected
+Scene Management data directory.
+
+Active reconnaissance is disabled by default. Set
+`SAG_SOURCE_INTELLIGENCE_ACTIVE_ENABLED=true` only after confirming that the
+deployment's jurisdiction, hosting agreement, and network-provider acceptable
+use policy permit it. Each run requires an explicit UI confirmation, accepts
+one public IP only, rejects the protected destination and non-public ranges,
+and has a 24-hour per-IP cooldown. The immutable profile uses ordinary TCP
+connects on a short common-port list and, only when a port is open, a standards-
+compliant HTTP HEAD request, TLS handshake, SSH greeting, or SMTP greeting.
+It does not perform vulnerability tests, authentication, exploitation, path
+enumeration, UDP sweeps, stealth, evasion, adjacent-host discovery, or CIDR
+scanning.
+
+Traffic received by a system you control may be preserved and analyzed for
+defense and reporting. That does not itself grant blanket authorization to
+access or test the remote system. Treat active results as reporting evidence,
+not retaliation or attribution, and obtain qualified legal guidance for the
+deployment's jurisdiction when authorization is uncertain.
+
 ## Retention and privacy
 
 `SAG_SECURITY_EVENT_RETENTION_DAYS` defaults to 30 and accepts 1–365 days.
@@ -231,20 +266,22 @@ cooldowns and a global hourly ceiling, choose UTC quiet hours with an optional
 critical override, select a redaction level, and send a labeled test alert.
 
 When WAF telemetry is configured, Scene Management also displays normalized
-CRS findings and whether each request was observed but not blocked, was rejected or rate limited by
-the origin, or was blocked at the edge. `Observed only (DetectionOnly; not
-blocked)` describes the WAF action, not a successful intrusion. An origin HTTP
-`2xx` confirms only that the routed request received a success-class response;
-it does not prove authentication, administrative access, or exploitation.
-Severity comes from the matched CRS rule and detection confidence rather than
-the origin status. Cards and Telegram alerts include the sanitized request,
-origin status, CRS IDs, safe rule descriptions, and a plain-English action and
-meaning. Raw headers, query values, bodies, cookies, and authorization data
-remain excluded. Telegram incidents are keyed by source
+CRS findings and whether ModSecurity interrupted the transaction. A response
+code taken from the ModSecurity JSON audit is explicitly labeled `WAF audit
+HTTP`; it is not treated as the final client response unless the WAF itself
+interrupted the request. For non-interrupted requests, correlate the WAF
+transaction/request ID and time with the origin edge access record before
+concluding that the origin returned `2xx`, `4xx`, or `429`. This prevents an
+audit `200` from creating a false success signal when the edge actually
+returned a denial or not-found response. Severity comes from the matched CRS
+rule and detection confidence rather than status. Cards and Telegram alerts
+include the sanitized request, audit-status provenance, CRS IDs, safe rule
+descriptions, and a plain-English action and meaning. Raw headers, query
+values, bodies, cookies, and authorization data remain excluded. Telegram
+incidents are keyed by source
 fingerprint, target, and attack category. The first qualifying event alerts
 immediately, duplicates accumulate, and ongoing activity re-alerts at the
-configured persistence interval even when the origin continues returning
-`429`. A quiet interval closes the active incident.
+configured persistence interval. A quiet interval closes the active incident.
 
 The event ledger remains authoritative. A notification is queued only after
 its security event has been durably appended. Delivery uses a bounded persisted
