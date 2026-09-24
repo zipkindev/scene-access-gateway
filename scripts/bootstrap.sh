@@ -7,6 +7,7 @@ mkdir -p \
   "$repository_root/.local/data" \
   "$repository_root/.local/secrets" \
   "$repository_root/.local/tls"
+chmod 0700 "$repository_root/.local/secrets"
 
 source_intelligence_token="$repository_root/.local/secrets/source-intelligence-token"
 if [ ! -e "$source_intelligence_token" ]; then
@@ -19,9 +20,9 @@ if [ ! -e "$source_intelligence_token" ]; then
     echo "source-intelligence token generation requires either openssl or Node.js" >&2
     exit 1
   fi
-  chmod 0600 "$source_intelligence_token"
   echo "created source-intelligence worker token"
 fi
+chmod 0444 "$source_intelligence_token"
 
 if [ ! -e "$repository_root/.env" ]; then
   cp "$repository_root/.env.example" "$repository_root/.env"
