@@ -106,6 +106,9 @@ class SecurityEvents {
     this.listeners = new Set();
     this.suppressed = 0;
     this.asyncWrites = options.asyncWrites === true;
+    this.destinationIp = typeof options.destinationIp === 'string' && net.isIP(options.destinationIp)
+      ? options.destinationIp : (net.isIP(process.env.SECURITY_MAP_DESTINATION_IP || '')
+        ? process.env.SECURITY_MAP_DESTINATION_IP : null);
     this.pendingBytes = 0;
     this.writeQueue = [];
     this.writing = false;
@@ -297,7 +300,8 @@ class SecurityEvents {
         event.integrityValid = supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
         delete event.integrity;
         presentWafEvent(event);
-        if (event.source?.scope === 'public' && !event.source.country) {
+        if (event.source?.scope === 'public' && (!event.source.country
+          || !Number.isFinite(event.source.latitude) || !Number.isFinite(event.source.longitude))) {
           const enriched = this.geoip.lookup(event.source.ip);
           event.source = { ...event.source, ...Object.fromEntries(Object.entries(enriched)
             .filter(([, value]) => value !== null && value !== undefined)) };
@@ -325,6 +329,50 @@ class SecurityEvents {
     return {
       types: [...new Set(matchingTypes.map((event) => event.type))].sort(),
       categories: [...new Set(matchingCategories.map(effectiveCategory).filter(Boolean))].sort(),
+    };
+  }
+
+  map(now = Date.now()) {
+    const events = this.list({ limit: 250, since: new Date(now - 24 * 60 * 60 * 1000).toISOString() });
+    const sources = new Map();
+    for (const event of events) {
+      const source = event.source || {};
+      if (source.scope !== 'public' || !net.isIP(source.ip)) continue;
+      const latitude = source.latitude;
+      const longitude = source.longitude;
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+      const current = sources.get(source.ip) || {
+        ip: source.ip, latitude, longitude, country: source.country || null,
+        region: source.region || null, city: source.city || null,
+        organization: source.organization || null, accuracyRadiusKm: source.accuracyRadiusKm ?? null,
+        count: 0, critical: 0, warning: 0, waf: 0,
+      };
+      current.count += 1;
+      if (event.severity === 'critical' || event.integrityValid === false) current.critical += 1;
+      else if (event.severity === 'warning') current.warning += 1;
+      if (event.type === 'waf_finding') current.waf += 1;
+      sources.set(source.ip, current);
+    }
+    let destinationIp = this.destinationIp;
+    if (!destinationIp) {
+      const targets = new Map();
+      for (const event of events) {
+        const target = event.edge?.target;
+        if (net.isIP(target || '')) targets.set(target, (targets.get(target) || 0) + 1);
+      }
+      destinationIp = [...targets].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+    }
+    const location = destinationIp ? this.geoip.lookup(destinationIp) : null;
+    const destination = location?.scope === 'public' && Number.isFinite(location.latitude)
+      && Number.isFinite(location.longitude) ? {
+        ip: destinationIp, latitude: location.latitude, longitude: location.longitude,
+        country: location.country || null, region: location.region || null, city: location.city || null,
+        organization: location.organization || null, accuracyRadiusKm: location.accuracyRadiusKm ?? null,
+      } : null;
+    return {
+      windowHours: 24, total: events.length, located: [...sources.values()].reduce((sum, source) => sum + source.count, 0),
+      sources: [...sources.values()].sort((a, b) => b.count - a.count || a.ip.localeCompare(b.ip)),
+      destination, destinationConfigured: Boolean(this.destinationIp),
     };
   }
 

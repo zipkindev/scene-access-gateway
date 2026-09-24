@@ -39,9 +39,10 @@ case "$probe_request_id" in
   *) echo "probe response did not contain a request UUID" >&2; exit 1 ;;
 esac
 curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/summary" | grep -q '"retentionDays":'
+curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/map" | grep -q '"sources":'
 curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/maxmind" | grep -q '"mode":"scene-management"'
 security_events=$(curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/events?limit=20")
-printf '%s\n' "$security_events" | grep -q 'automated_scanner_probe'
+printf '%s\n' "$security_events" | grep -q 'framework_admin_probe'
 printf '%s\n' "$security_events" | grep -q '"status":404'
 printf '%s\n' "$security_events" | grep -q "\"requestId\":\"$probe_request_id\""
 frontend_logs=$(docker compose -p "$smoke_project" -f "$repository_root/compose.yaml" logs --no-color --no-log-prefix frontend)

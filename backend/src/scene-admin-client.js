@@ -1,6 +1,6 @@
 'use strict';
 
-const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','browserTitle','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','securityPanel','securitySummary','securitySeverity','securityRefresh','securityStatus','securityEvents','telegramToken','telegramVerifyBot','telegramBotLink','telegramBotStatus','telegramChat','telegramChatId','telegramDiscoverChats','telegramConnectChat','telegramDisconnect','telegramConfigured','telegramEnabled','telegramSeverity','telegramRedaction','telegramThreshold','telegramWindow','telegramCooldown','telegramReminder','telegramQuietAfter','telegramHourlyLimit','telegramQuietEnabled','telegramQuietStart','telegramQuietEnd','telegramCriticalOverride','telegramSave','telegramTest','telegramStatus','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
+const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','browserTitle','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','securityPanel','securitySummary','securitySeverity','securityRefresh','securityStatus','securityEvents','securityMap','securityMapSvg','securityMapRoutes','securityMapNodes','securityMapSummary','securityMapSelection','securityMapDestination','telegramToken','telegramVerifyBot','telegramBotLink','telegramBotStatus','telegramChat','telegramChatId','telegramDiscoverChats','telegramConnectChat','telegramDisconnect','telegramConfigured','telegramEnabled','telegramSeverity','telegramRedaction','telegramThreshold','telegramWindow','telegramCooldown','telegramReminder','telegramQuietAfter','telegramHourlyLimit','telegramQuietEnabled','telegramQuietStart','telegramQuietEnd','telegramCriticalOverride','telegramSave','telegramTest','telegramStatus','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
 let state;
 let scene;
 let selectedIndex = 0;
@@ -901,6 +901,8 @@ function securityMetric(value, label) {
 const countryNames = typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(['en'], { type: 'region' }) : null;
 const securityFilters = Object.fromEntries(['stream', 'severity', 'type', 'category', 'country', 'source']
   .map((kind) => [kind, new Map()]));
+let securityMapData = null;
+let selectedMapSource = null;
 const securityLabels = {
   stream: 'Stream', severity: 'Severity', type: 'Event', category: 'Alert', country: 'Country', source: 'Source',
 };
@@ -1028,6 +1030,7 @@ securityFilterChips.className = 'security-filter-chips';
 securityToolbar.after(securityFilterChips);
 
 function renderSecurityFilters() {
+  if (selectedMapSource && !securityFilters.source.has(selectedMapSource)) selectedMapSource = null;
   for (const [value, button] of streamButtons) {
     button.setAttribute('aria-pressed', String(securityFilters.stream.has(value)));
   }
@@ -1102,6 +1105,122 @@ securityClear.addEventListener('click', () => {
   loadSecurity();
 });
 renderSecurityFilters();
+
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+
+function mapPoint(latitude, longitude) {
+  return {
+    x: 18 + (Number(longitude) + 180) / 360 * 964,
+    y: 34 + (90 - Number(latitude)) / 180 * 448,
+  };
+}
+
+function mapLabel(location) {
+  const place = [location.city, location.region, location.country].filter(Boolean).join(', ');
+  return place || 'Approximate location unavailable';
+}
+
+function mapElement(name, attributes = {}) {
+  const item = document.createElementNS(SVG_NAMESPACE, name);
+  for (const [key, value] of Object.entries(attributes)) item.setAttribute(key, String(value));
+  return item;
+}
+
+function mapRoute(source, destination, selected) {
+  const start = mapPoint(source.latitude, source.longitude);
+  const end = mapPoint(destination.latitude, destination.longitude);
+  const distance = Math.hypot(end.x - start.x, end.y - start.y);
+  const middleX = (start.x + end.x) / 2;
+  const middleY = (start.y + end.y) / 2 - Math.min(105, 25 + distance * 0.18);
+  return mapElement('path', {
+    class: 'map-route' + (selected ? ' selected' : ''),
+    d: `M${start.x.toFixed(1)} ${start.y.toFixed(1)} Q${middleX.toFixed(1)} ${middleY.toFixed(1)} ${end.x.toFixed(1)} ${end.y.toFixed(1)}`,
+  });
+}
+
+function clearMapSource() {
+  if (!selectedMapSource && !securityFilters.source.size) return;
+  securityFilters.source.clear();
+  selectedMapSource = null;
+  renderSecurityFilters();
+  renderSecurityMap(securityMapData);
+  loadSecurity();
+}
+
+function toggleMapSource(source) {
+  if (selectedMapSource === source.ip) return clearMapSource();
+  securityFilters.source.clear();
+  securityFilters.source.set(source.ip, source.ip);
+  selectedMapSource = source.ip;
+  renderSecurityFilters();
+  renderSecurityMap(securityMapData);
+  loadSecurity();
+}
+
+function renderSecurityMap(data) {
+  securityMapData = data;
+  if (!data) return;
+  const destination = data.destination;
+  const sources = Array.isArray(data.sources) ? data.sources : [];
+  elements.securityMap.classList.toggle('has-selection', Boolean(selectedMapSource));
+  elements.securityMapSummary.textContent = data.located + ' of ' + data.total + ' recent event'
+    + (data.total === 1 ? '' : 's') + ' located · ' + sources.length + ' source'
+    + (sources.length === 1 ? '' : 's');
+  elements.securityMapSelection.textContent = selectedMapSource
+    ? 'Showing alerts from ' + selectedMapSource + ' · select again or click the map to clear'
+    : 'Click a source to isolate its alerts';
+  elements.securityMapDestination.textContent = destination
+    ? 'Destination ' + destination.ip + ' · ' + mapLabel(destination)
+      + (data.destinationConfigured ? '' : ' · detected WAF target')
+    : 'Set SAG_SECURITY_MAP_DESTINATION_IP and install GeoLite2 City to draw routes';
+  const routes = [];
+  const nodes = [];
+  for (const source of sources) {
+    const selected = selectedMapSource === source.ip;
+    if (destination) routes.push(mapRoute(source, destination, selected));
+    const point = mapPoint(source.latitude, source.longitude);
+    const radius = Math.min(25, 5 + Math.sqrt(source.count) * 2.8);
+    const node = mapElement('circle', {
+      class: 'map-hotspot' + (selected ? ' selected' : ''), cx: point.x.toFixed(1), cy: point.y.toFixed(1), r: radius.toFixed(1),
+      tabindex: '0', role: 'button', 'data-map-source': source.ip,
+      'aria-label': source.ip + ', ' + mapLabel(source) + ', ' + source.count + ' requests. Select to filter alerts.',
+    });
+    const title = mapElement('title');
+    title.textContent = source.ip + ' · ' + mapLabel(source) + ' · ' + source.count + ' requests'
+      + (source.waf ? ' · ' + source.waf + ' WAF findings' : '')
+      + (source.organization ? ' · ' + source.organization : '');
+    node.append(title);
+    node.addEventListener('click', (event) => { event.stopPropagation(); toggleMapSource(source); });
+    node.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleMapSource(source);
+      }
+    });
+    nodes.push(node);
+  }
+  if (destination) {
+    const point = mapPoint(destination.latitude, destination.longitude);
+    nodes.push(mapElement('circle', { class: 'map-destination-ring', cx: point.x.toFixed(1), cy: point.y.toFixed(1), r: '10' }));
+    const marker = mapElement('circle', { class: 'map-destination', cx: point.x.toFixed(1), cy: point.y.toFixed(1), r: '7' });
+    const title = mapElement('title');
+    title.textContent = 'Destination · ' + destination.ip + ' · ' + mapLabel(destination);
+    marker.append(title);
+    nodes.push(marker);
+  }
+  if (!sources.length) {
+    const message = mapElement('text', { class: 'map-empty', x: '500', y: '268' });
+    message.textContent = data.total ? 'GeoLite2 City coordinates are unavailable for recent public sources.' : 'No security events in the last 24 hours.';
+    nodes.push(message);
+  }
+  elements.securityMapRoutes.replaceChildren(...routes);
+  elements.securityMapNodes.replaceChildren(...nodes);
+}
+
+elements.securityMapSvg.addEventListener('click', (event) => {
+  if (!event.target.closest('[data-map-source]')) clearMapSource();
+});
 
 function fillSecurityOptions(select, values, label, kind, emptyLabel = 'No matching options') {
   const available = values.filter((value) => !securityFilters[kind].has(value));
@@ -1488,13 +1607,15 @@ async function loadSecurity() {
     for (const [kind, values] of Object.entries(securityFilters)) {
       for (const value of values.keys()) parameters.append(kind, value);
     }
-    const [summaryResponse, eventsResponse] = await Promise.all([
+    const [summaryResponse, eventsResponse, mapResponse] = await Promise.all([
       fetch('/api/security/summary', { cache: 'no-store' }),
       fetch('/api/security/events?' + parameters, { cache: 'no-store' }),
+      fetch('/api/security/map', { cache: 'no-store' }),
     ]);
-    if (!summaryResponse.ok || !eventsResponse.ok) throw new Error('Security monitoring is unavailable');
+    if (!summaryResponse.ok || !eventsResponse.ok || !mapResponse.ok) throw new Error('Security monitoring is unavailable');
     const summary = await summaryResponse.json();
     const result = await eventsResponse.json();
+    renderSecurityMap(await mapResponse.json());
     const options = result.filterOptions || { types: [], categories: [] };
     fillSecurityOptions(securityTypeAdd, options.types || [], readableSecurityValue, 'type',
       'No matching event types');
@@ -1571,7 +1692,14 @@ async function loadSecurity() {
   finally { elements.securityRefresh.disabled = false; }
 }
 elements.securityRefresh.addEventListener('click', loadSecurity);
-elements.securityPanel.addEventListener('toggle', () => { if (elements.securityPanel.open) loadSecurity(); });
+elements.securityPanel.addEventListener('toggle', () => {
+  elements.workspace.classList.toggle('security-mode', elements.securityPanel.open);
+  elements.securityMap.hidden = !elements.securityPanel.open;
+  elements.workspace.setAttribute('aria-label', elements.securityPanel.open
+    ? 'Interactive security connection map' : 'Scene preview');
+  if (elements.securityPanel.open) loadSecurity();
+  else requestAnimationFrame(fitFrame);
+});
 
 async function load(preserveScene = false) {
   state = await fetch('/api/state').then((response) => response.json());

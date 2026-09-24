@@ -43,7 +43,9 @@ const geoIp = new GeoIpLookup(process.env.GEOIP_CITY_DB_PATH || path.join(manage
   process.env.GEOIP_ASN_DB_PATH || path.join(managedGeoIpDirectory, 'GeoLite2-ASN.mmdb'));
 const maxMindSetup = new MaxMindSetup(DATA_DIR, geoIp,
   { managed: !process.env.GEOIP_CITY_DB_PATH && !process.env.GEOIP_ASN_DB_PATH });
-const securityEvents = new SecurityEvents(DATA_DIR, geoIp, { asyncWrites: true });
+const securityEvents = new SecurityEvents(DATA_DIR, geoIp, {
+  asyncWrites: true, destinationIp: process.env.SECURITY_MAP_DESTINATION_IP,
+});
 const telegramAlerts = new TelegramAlerts(DATA_DIR);
 securityEvents.subscribe((event) => telegramAlerts.enqueue(event));
 const wafIngestor = new WafIngestor(process.env.WAF_EVENT_INPUT_PATH || null, securityEvents, DATA_DIR,

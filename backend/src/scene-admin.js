@@ -266,6 +266,9 @@ function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTele
     if (url.pathname === '/api/security/summary' && request.method === 'GET') {
       return json(response, 200, securityEvents.summary());
     }
+    if (url.pathname === '/api/security/map' && request.method === 'GET') {
+      return json(response, 200, securityEvents.map());
+    }
     if (url.pathname === '/api/security/events' && request.method === 'GET') {
       const keys = [...url.searchParams.keys()];
       if (keys.some((key) => !['limit', 'stream', 'severity', 'type', 'category', 'country', 'source', 'since'].includes(key))

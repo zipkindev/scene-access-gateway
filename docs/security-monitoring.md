@@ -166,6 +166,22 @@ IP. Events written before the databases were mounted are enriched at read time,
 without rewriting the integrity-protected ledger. Private and loopback sources
 are identified by scope and are never sent to a lookup service.
 
+Opening **Security monitoring** replaces the scene preview with an interactive
+24-hour connection map. Each red hotspot represents a public source IP with
+local GeoLite2 City coordinates; its size reflects the number of recorded
+application and WAF events. Routes terminate at the deployment's public ISP
+address. Select a hotspot to apply the existing exact-source filter to the
+event list, select it again or select the map background to clear that filter.
+The other routes remain visible in a muted color for context.
+
+Set `SAG_SECURITY_MAP_DESTINATION_IP` to the public IP where the WAF or gateway
+receives traffic. If it is unset, Scene Management can use the most frequent
+numeric WAF target in the current event window. The destination and all source
+locations are resolved only through the same local GeoIP database; no address
+is submitted to an external map or geolocation service. Without a loaded City
+database, the security console continues to work and the map explains why no
+coordinates can be drawn.
+
 ## Event filters
 
 The controls directly above the event list can be combined:

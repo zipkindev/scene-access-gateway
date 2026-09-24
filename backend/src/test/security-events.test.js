@@ -113,6 +113,10 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(client, /WAF observed, not blocked/);
   assert.match(client, /status alone does not prove access or exploitation/);
   assert.match(client, /Observed only \(DetectionOnly; not blocked\)/);
+  assert.match(client, /securityMap/);
+  assert.match(client, /map-hotspot/);
+  assert.match(client, /toggleMapSource/);
+  assert.match(html, /Connection origins/);
 });
 
 test('stored WAF protocol findings are re-ranked for presentation without rewriting the ledger', () => temporary((directory) => {
@@ -160,6 +164,31 @@ test('GeoIP lookup fails closed when local databases are absent', () => {
   assert.equal(lookup.lookup('203.0.113.8').scope, 'public');
 });
 
+test('security map aggregates located sources and uses the configured public destination', () => temporary((directory) => {
+  const locatedGeo = {
+    lookup(ip) {
+      if (ip === '45.118.10.5') return { scope: 'public', country: 'LT', city: 'Vilnius',
+        latitude: 54.6872, longitude: 25.2797, organization: 'Example source' };
+      if (ip === '198.51.100.42') return { scope: 'public', country: 'US', city: 'New York',
+        latitude: 40.7128, longitude: -74.006, organization: 'Example ISP' };
+      return { scope: 'private' };
+    },
+    status: noGeo.status,
+  };
+  const events = new SecurityEvents(directory, locatedGeo, { destinationIp: '198.51.100.42' });
+  events.record('waf_finding', { ip: '45.118.10.5', severity: 'warning', category: 'protocol_anomaly',
+    edge: { target: '198.51.100.42', disposition: 'waf_blocked' } });
+  events.record('suspicious_request', { ip: '45.118.10.5', severity: 'critical', category: 'sql_injection_probe' });
+  const map = events.map();
+  assert.equal(map.total, 2);
+  assert.equal(map.located, 2);
+  assert.equal(map.sources.length, 1);
+  assert.deepEqual({ ip: map.sources[0].ip, count: map.sources[0].count, waf: map.sources[0].waf },
+    { ip: '45.118.10.5', count: 2, waf: 1 });
+  assert.equal(map.destination.ip, '198.51.100.42');
+  assert.equal(map.destinationConfigured, true);
+}));
+
 test('security event filters compose across severity, category, country, exact IP, and CIDR', () => temporary((directory) => {
   const events = new SecurityEvents(directory, noGeo);
   events.record('suspicious_request', { ip: '45.118.10.5', severity: 'warning',
@@ -203,6 +232,9 @@ test('authenticated Scene Management exposes summary and redacted events', async
     assert.doesNotMatch(JSON.stringify(body), /private@example\.com/);
     const summary = JSON.parse((await invoke(handler, '/api/security/summary', { 'x-scene-admin': 'owner' })).body);
     assert.equal(summary.accessRequests, 1);
+    const map = await invoke(handler, '/api/security/map', { 'x-scene-admin': 'owner' });
+    assert.equal(map.status, 200);
+    assert.equal(JSON.parse(map.body).total, 1);
     const maxmind = JSON.parse((await invoke(handler, '/api/security/maxmind', { 'x-scene-admin': 'owner' })).body);
     assert.equal(maxmind.mode, 'scene-management');
     assert.equal(maxmind.configured, false);
