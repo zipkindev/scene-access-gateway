@@ -22,7 +22,7 @@ function prepareFirewallDestination(input) {
     approval: Object.freeze({ method: 'existing portal email', sessionSeconds: 900, separateFrom: 'torrentharbor',
       destinationLogin: 'existing pfSense login; no SSO' }),
     network: Object.freeze([
-      'Existing WAN IPv4 and IPv6 TCP 44334 routes to access portal',
+      'External TCP 443 routes through reviewed NAT to the private portal listener',
       'Public DNS resolves the configured firewall origin to the reviewed gateway',
       'The gateway certificate includes the configured firewall hostname',
       'The reviewed proxy source can reach only the configured firewall upstream',

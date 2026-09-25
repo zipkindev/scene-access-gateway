@@ -59,6 +59,10 @@ Application routing and exceptions are inventoried in
 ignored deployment overlay. Update the contract and pass
 `scripts/check-application-contracts.js` before adding proxy routes, Authentik
 groups, QR destinations, CSP sources, cookies, or WAF exclusions.
+Browser-facing origins use standard HTTPS without an internal listener port.
+NAT destinations and private WAF/proxy listener ports belong only in the
+protected deployment overlay and must never be emitted in QR actions,
+redirects, CSP `form-action`, forwarded public hosts, or rewritten locations.
 
 `SAG_SOURCE_INTELLIGENCE_ACTIVE_ENABLED` defaults to `false`. Passive source
 investigations still combine the local event ledger and GeoLite data with

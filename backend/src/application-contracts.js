@@ -28,6 +28,8 @@ function validateApplicationContracts(value) {
     ids.add(application.id);
     assert(['path', 'host'].includes(application.public?.mode), `${application.id} has an invalid public mode`);
     environment(application.public.originEnvironment, `${application.id} public origin`);
+    assert(application.public.scheme === 'https' && application.public.port === 443,
+      `${application.id} browser origin must use standard HTTPS`);
     if (application.public.mode === 'path') {
       const route = application.public.route;
       assert(typeof route === 'string' && /^\/[a-z0-9/-]*$/.test(route) && route.endsWith('/'), `${application.id} has an invalid route`);
@@ -77,6 +79,10 @@ function validateApplicationContracts(value) {
     for (const required of REQUIRED) assert(journeys.has(required), `${application.id} is missing ${required} verification`);
     if (access.portalSession) assert(journeys.has('anonymous-redirect'), `${application.id} is missing anonymous access verification`);
     if (access.qrDestination) assert(journeys.has('qr-click-receipt'), `${application.id} is missing QR perception verification`);
+    if (access.qrDestination && application.public.mode === 'host') {
+      assert(access.returnToPortalOrigin === true,
+        `${application.id} must preserve the initiating portal origin`);
+    }
     if (access.authentikRelay) assert(journeys.has('authentik-relay'), `${application.id} is missing Authentik relay verification`);
   }
   return value;

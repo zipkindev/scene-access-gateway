@@ -3,7 +3,7 @@
   "applications": [
     {
       "id": "portal",
-      "public": { "mode": "path", "route": "/", "originEnvironment": "PUBLIC_ORIGIN" },
+      "public": { "mode": "path", "route": "/", "originEnvironment": "PUBLIC_ORIGIN", "scheme": "https", "port": 443 },
       "upstream": { "kind": "local-service", "service": "access-portal" },
       "access": { "portalSession": false, "authentikRelay": false, "qrDestination": false },
       "proxy": { "preservePrefix": true, "originPolicy": "same-origin", "hostPolicy": "public-host" },
@@ -13,7 +13,7 @@
     },
     {
       "id": "torrentharbor",
-      "public": { "mode": "path", "route": "/torrentharbor/", "originEnvironment": "PUBLIC_ORIGIN" },
+      "public": { "mode": "path", "route": "/torrentharbor/", "originEnvironment": "PUBLIC_ORIGIN", "scheme": "https", "port": 443 },
       "upstream": {
         "kind": "tls-origin",
         "addressEnvironment": "TORRENTHARBOR_UPSTREAM",
@@ -47,7 +47,7 @@
     },
     {
       "id": "firewall",
-      "public": { "mode": "host", "originEnvironment": "FIREWALL_ORIGIN" },
+      "public": { "mode": "host", "originEnvironment": "FIREWALL_ORIGIN", "scheme": "https", "port": 443 },
       "upstream": {
         "kind": "tls-origin",
         "addressEnvironment": "FIREWALL_UPSTREAM_IP",
@@ -59,7 +59,8 @@
         "authentikRelay": false,
         "authentikGroup": "app:firewall",
         "qrDestination": true,
-        "separateApproval": true
+        "separateApproval": true,
+        "returnToPortalOrigin": true
       },
       "proxy": { "preservePrefix": true, "originPolicy": "rewrite-to-upstream", "hostPolicy": "tls-name" },
       "browserPolicy": { "externalSources": [] },

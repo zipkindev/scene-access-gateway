@@ -38,6 +38,10 @@ The target overlay must remain consistent with
 [`deploy/applications.json`](../applications.json). For each protected app,
 verify the declared host/path, upstream TLS identity, origin rewrite, cookies,
 browser-policy sources, Authentik/QR behavior, and negative-route response.
+External browser URLs must remain standard HTTPS on port 443 even when NAT
+forwards them to a different private WAF listener port. Keep that transport
+port out of QR actions, redirects, CSP sources, forwarded public hosts, and
+upstream location rewrites.
 Target-only WAF exceptions still need the same exact rule/path/method,
 rationale, review date, and journey evidence as the tracked contract.
 
