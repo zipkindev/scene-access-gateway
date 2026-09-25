@@ -232,7 +232,7 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
     ${clickDebugger ? '<output class="scene-click-status" id="sceneClickStatus" aria-live="polite"></output>' : ''}
     <script nonce="${scriptNonce}" src="/scene-framing.js?v=23"></script>
     ${interactive ? `<script nonce="${scriptNonce}" src="/scene-game.js?v=60"></script>` : ''}
-    ${carousel ? `<script nonce="${scriptNonce}" src="/future-game-carousel.js?v=66"></script><script nonce="${scriptNonce}" src="/future-nature-audio.js?v=46"></script><script nonce="${scriptNonce}" src="/future-sample-audio.js?v=48"></script>` : ''}
+    ${carousel ? `<script nonce="${scriptNonce}" src="/future-game-carousel.js?v=106"></script><script nonce="${scriptNonce}" src="/future-nature-audio.js?v=46"></script><script nonce="${scriptNonce}" src="/future-sample-audio.js?v=48"></script>` : ''}
     ${bundledMotion ? `<script nonce="${scriptNonce}" src="/scene-motion.js?v=15"></script>` : ''}
     ${futureMotion ? `<script nonce="${scriptNonce}" src="/future-motion-runtime.js?v=41"></script>` : ''}
     ${futureMotion ? `<script nonce="${scriptNonce}" src="/future-feature-clicks.js?v=48"></script>` : ''}

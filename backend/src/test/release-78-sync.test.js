@@ -27,8 +27,12 @@ test('release 78 leaderboard supports every Arcade board and persists rankings',
     assert.equal(board.list('wolf3d')[0].completed, true);
     assert.equal(board.list('spear')[0].difficulty, 3);
     assert.deepEqual(new ArcadeLeaderboard(directory).list('lights'), board.list('lights'));
-    assert.throws(() => board.submit({ game: 'lights', initials: 'AAA', timeMs: 1,
-      moves: 1, runId: runId(1) }), /already submitted/);
+    const beforeRetry = board.list('lights');
+    const retry = board.submit({ game: 'lights', initials: 'ZZZ', timeMs: 1,
+      moves: 1, runId: runId(1) });
+    assert.equal(retry.duplicate, true);
+    assert.deepEqual(retry.board, beforeRetry);
+    assert.deepEqual(board.list('lights'), beforeRetry);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
@@ -53,6 +57,7 @@ test('release 78 public source retains final challenge, score, and CRT contracts
   const server = source('server.js');
   const carousel = source('future-game-carousel.js');
   assert.match(landing, /future-wolf3d-crt\.js\?v=78/);
+  assert.match(landing, /future-game-carousel\.js\?v=106/);
   assert.match(landing, /if \(result\.terminal\) \{ clearInterval\(portalPoll\); return; \}/);
   assert.match(landing, /let clickQueue = Promise\.resolve\(\)/);
   assert.match(landing, /clickQueue = clickQueue\.then/);
@@ -71,6 +76,8 @@ test('release 78 public source retains final challenge, score, and CRT contracts
     'treasure', 'knight', 'pegs', 'reversi', 'four', 'circuit']) {
     assert.ok(carousel.includes(game), `missing Arcade game contract: ${game}`);
   }
+  assert.match(carousel, /finishedGames\.add\(result\.game\)/);
+  assert.match(carousel, /if \(finishedGames\.has\(gameId\)\) return/);
   for (const text of [landing, server, source('scene-admin.js'), source('scene-config.js')]) {
     assert.doesNotMatch(text, /zipkin\.dev|192\.168\.|\bmzipkin\b|\bmike\b/i);
   }

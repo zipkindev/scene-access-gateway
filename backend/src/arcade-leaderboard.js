@@ -110,7 +110,7 @@ class ArcadeLeaderboard {
 
   submit(value) {
     this._validate(value);
-    if (this.state.seenRuns.includes(value.runId)) throw new Error('run already submitted');
+    if (this.state.seenRuns.includes(value.runId)) return { duplicate: true, board: this.list(value.game) };
     this.state.seenRuns.push(value.runId);
     if (this.state.seenRuns.length > 4096) this.state.seenRuns.splice(0, this.state.seenRuns.length - 4096);
     const now = new Date().toISOString();
