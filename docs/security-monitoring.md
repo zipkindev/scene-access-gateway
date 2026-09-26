@@ -331,6 +331,11 @@ one bounded backfill across its retained normalized findings and current edge
 correlation log. Exact matches become signed outcome corrections; records whose
 edge evidence has rotated away remain explicitly unavailable.
 
+Paginated event reads use the last event's timestamp and unique event ID as a
+keyset cursor. This prevents same-timestamp WAF imports from being skipped at a
+250-card page boundary. Filtered CSV export continues to read the complete
+matching retained ledger rather than depending on browser pagination.
+
 The ruleset includes curated descriptions for every rule observed during the
 initial DetectionOnly review, including protocol and method violations,
 command/PHP/Node.js injection, prototype-pollution, cross-site scripting, SQL

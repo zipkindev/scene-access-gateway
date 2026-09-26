@@ -1965,6 +1965,7 @@ elements.securityLoadOlder.textContent = 'Load older events';
 elements.securityLoadOlder.hidden = true;
 elements.securityEvents.after(elements.securityLoadOlder);
 let securityNextBefore = null;
+let securityNextBeforeId = null;
 let securityLoadedCount = 0;
 let securityActiveSince = null;
 
@@ -2008,9 +2009,10 @@ function securityEventRow(event) {
   return row;
 }
 
-function securityEventParameters(before = null) {
+function securityEventParameters(before = null, beforeId = null) {
   const parameters = new URLSearchParams({ limit: '250', since: securityActiveSince });
   if (before) parameters.set('before', before);
+  if (beforeId) parameters.set('beforeId', beforeId);
   for (const [kind, values] of Object.entries(securityFilters)) {
     for (const value of values.keys()) parameters.append(kind, value);
   }
@@ -2051,6 +2053,7 @@ function renderSecurityEventPage(result, append = false) {
   }
   securityLoadedCount = append ? securityLoadedCount + result.events.length : result.events.length;
   securityNextBefore = result.nextBefore || null;
+  securityNextBeforeId = result.nextBeforeId || null;
   elements.securityLoadOlder.hidden = !result.hasMore;
 }
 
@@ -2119,7 +2122,8 @@ elements.securityLoadOlder.addEventListener('click', async () => {
   if (!securityNextBefore) return;
   elements.securityLoadOlder.disabled = true;
   try {
-    const response = await fetch('/api/security/events?' + securityEventParameters(securityNextBefore), { cache: 'no-store' });
+    const response = await fetch('/api/security/events?'
+      + securityEventParameters(securityNextBefore, securityNextBeforeId), { cache: 'no-store' });
     if (!response.ok) throw new Error('Older security events are unavailable');
     renderSecurityEventPage(await response.json(), true);
     elements.securityLoadOlder.textContent = securityNextBefore ? 'Load older events' : 'Oldest retained event reached';

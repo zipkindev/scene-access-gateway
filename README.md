@@ -81,6 +81,9 @@ presented through a versioned ruleset, including retained events, and distinguis
 verified final responses from historical records whose exact edge evidence is
 unavailable. A bounded upgrade backfill recovers final outcomes when both the
 retained finding and exact-ID edge record still exist.
+Security event pages use a timestamp-and-event-ID cursor so bulk imports with
+identical timestamps remain complete; filtered CSV export reads the full
+matching ledger independently of UI pagination.
 
 ![Scene Management passive source intelligence with sanitized RFC-reserved evidence](docs/media/scene-management-source-intelligence.png)
 

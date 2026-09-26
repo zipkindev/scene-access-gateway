@@ -142,14 +142,15 @@ const SECURITY_FILTER_KEYS = ['stream', 'severity', 'type', 'category', 'country
   'method', 'status', 'disposition', 'since'];
 
 function securityEventFilters(url, pagination = false) {
-  const allowed = new Set(pagination ? [...SECURITY_FILTER_KEYS, 'limit', 'before'] : SECURITY_FILTER_KEYS);
+  const allowed = new Set(pagination ? [...SECURITY_FILTER_KEYS, 'limit', 'before', 'beforeId'] : SECURITY_FILTER_KEYS);
   if ([...url.searchParams.keys()].some((key) => !allowed.has(key))
-    || ['since', ...(pagination ? ['limit', 'before'] : [])]
+    || ['since', ...(pagination ? ['limit', 'before', 'beforeId'] : [])]
       .some((key) => url.searchParams.getAll(key).length > 1)) throw new Error('Invalid security-event query');
   return {
     limit: pagination ? url.searchParams.get('limit') : null,
     since: url.searchParams.get('since'),
     before: pagination ? url.searchParams.get('before') : null,
+    beforeId: pagination ? url.searchParams.get('beforeId') : null,
     stream: url.searchParams.getAll('stream'), severity: url.searchParams.getAll('severity'),
     type: url.searchParams.getAll('type'), category: url.searchParams.getAll('category'),
     country: url.searchParams.getAll('country'), city: url.searchParams.getAll('city'),

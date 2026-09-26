@@ -344,6 +344,11 @@ class SecurityEvents {
     const requestedBefore = options.before;
     if (requestedBefore && !Number.isFinite(Date.parse(requestedBefore))) throw new Error('Invalid event cursor');
     const before = requestedBefore ? Date.parse(requestedBefore) : Infinity;
+    const beforeId = options.beforeId;
+    if (beforeId && (!requestedBefore || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(beforeId))) {
+      throw new Error('Invalid event cursor ID');
+    }
+    let cursorReached = !beforeId;
     const outcomes = this._wafOutcomes();
     for (const name of this._files().reverse()) {
       const lines = fs.readFileSync(path.join(this.directory, name), 'utf8').trim().split('\n').filter(Boolean).reverse();
@@ -351,7 +356,15 @@ class SecurityEvents {
         let event;
         try { event = JSON.parse(line); } catch (_) { continue; }
         const eventTime = Date.parse(event.at);
-        if (eventTime < since || eventTime >= before) continue;
+        if (eventTime < since) continue;
+        if (beforeId && !cursorReached) {
+          if (event.id === beforeId) {
+            if (eventTime !== before) throw new Error('Event cursor does not match its timestamp');
+            cursorReached = true;
+          }
+          continue;
+        }
+        if (!beforeId && eventTime >= before) continue;
         const integrity = event.integrity;
         const canonical = { ...event };
         delete canonical.integrity;
@@ -430,7 +443,9 @@ class SecurityEvents {
     }
     const hasMore = events.length > limit;
     if (hasMore) events.pop();
-    return { events, hasMore, nextBefore: hasMore ? events.at(-1)?.at || null : null };
+    return { events, hasMore,
+      nextBefore: hasMore ? events.at(-1)?.at || null : null,
+      nextBeforeId: hasMore ? events.at(-1)?.id || null : null };
   }
 
   filterOptions(options = {}) {

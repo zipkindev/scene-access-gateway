@@ -151,7 +151,7 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(html, /security-globe\.js\?v=99/);
   assert.match(html, /Enable public click debugger/);
   assert.match(client, /scene\.diagnostics = \{ clickDebugger: elements\.clickDebugger\.checked \}/);
-  assert.match(html, /admin\.js\?v=115/);
+  assert.match(html, /admin\.js\?v=116/);
   const globe = fs.readFileSync(path.join(__dirname, '../security-globe.js'), 'utf8');
   assert.match(globe, /cameraSequence/);
   assert.match(globe, /routeDuration/);
@@ -269,9 +269,28 @@ test('retained-window summaries and maps aggregate beyond the 250-card display l
   const first = events.page({ limit: 250, since: 'all' });
   assert.equal(first.events.length, 250);
   assert.equal(first.hasMore, true);
-  const second = events.page({ limit: 250, since: 'all', before: first.nextBefore });
+  const second = events.page({ limit: 250, since: 'all', before: first.nextBefore,
+    beforeId: first.nextBeforeId });
   assert.equal(second.events.length, 70);
   assert.equal(second.hasMore, false);
+}));
+
+test('event pagination does not skip records that share the cursor timestamp', () => temporary((directory) => {
+  const events = new SecurityEvents(directory, noGeo);
+  const at = new Date(Date.now() - 1000).toISOString();
+  const earlier = new Date(Date.now() - 5000).toISOString();
+  for (let index = 0; index < 300; index += 1) events.record('waf_finding', {
+    at: index % 7 === 0 ? earlier : at,
+    ip: '203.0.113.8', severity: 'info', category: 'protocol_anomaly',
+    outcome: 'outcome_unknown', http: { method: 'GET', path: '/', status: 200 },
+    edge: { target: 'access.example', ruleIds: ['920320'], transactionId: `same-time-${index}` },
+  });
+  const first = events.page({ limit: 250, since: 'all' });
+  const second = events.page({ limit: 250, since: 'all', before: first.nextBefore,
+    beforeId: first.nextBeforeId });
+  assert.equal(first.events.length, 250);
+  assert.equal(second.events.length, 50);
+  assert.equal(new Set([...first.events, ...second.events].map((event) => event.id)).size, 300);
 }));
 
 test('security event filters compose across evidence, geography, exact IP, and CIDR', () => temporary((directory) => {
@@ -382,6 +401,10 @@ test('authenticated Scene Management exposes summary and redacted events', async
     assert.equal(invalid.status, 400);
     const invalidCursor = await invoke(handler, '/api/security/events?before=not-a-date', { 'x-scene-admin': 'owner' });
     assert.equal(invalidCursor.status, 400);
+    const invalidCursorId = await invoke(handler,
+      '/api/security/events?before=2026-09-26T00%3A00%3A00.000Z&beforeId=not-an-id',
+      { 'x-scene-admin': 'owner' });
+    assert.equal(invalidCursorId.status, 400);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
