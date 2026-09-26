@@ -101,6 +101,17 @@ test('CRS protocol rules retain their own severity and are not promoted by an HT
   assert.equal(restrictedHeader.category, 'protocol_anomaly');
   assert.equal(restrictedHeader.severity, 'critical');
   assert.equal(restrictedHeader.edge.ruleSummary, 'HTTP header restricted by policy');
+
+  const missingAgent = normalizeAudit(audit({
+    request: { hostname: 'access.example.invalid', method: 'GET', uri: '/' },
+    response: { http_code: 200 },
+    messages: [{ message: 'Missing User Agent Header', details: {
+      ruleId: '920320', severity: '5', tags: ['attack-protocol'],
+    } }],
+  }));
+  assert.equal(missingAgent.category, 'protocol_anomaly');
+  assert.equal(missingAgent.severity, 'info');
+  assert.equal(missingAgent.edge.ruleSummary, 'Request missing User-Agent header');
 });
 
 test('a ModSecurity interruption is a verified final edge outcome', () => {

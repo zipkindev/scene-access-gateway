@@ -132,6 +132,24 @@ test('WAF Telegram alerts distinguish edge rejection from the audit-phase status
   assert.doesNotMatch(requests[0].text, /Outcome: observed_passed|Results: observed passed/);
 }));
 
+test('successful WAF observations state the concrete origin result without generic exploitation caveats', async () => temporary(async (directory) => {
+  const requests = [];
+  const alerts = new TelegramAlerts(directory, { ...credentials(directory), retryDelays: [0],
+    fetch: async (_url, options) => { requests.push(JSON.parse(options.body)); return { ok: true, status: 200 }; } });
+  alerts.updatePolicy({ ...DEFAULT_POLICY, enabled: true, minimumSeverity: 'info', countThreshold: 1,
+    categories: [...DEFAULT_POLICY.categories, 'protocol_anomaly'] });
+  assert.equal(alerts.enqueue(event({ type: 'waf_finding', severity: 'info', category: 'protocol_anomaly',
+    outcome: 'observed_passed', http: { method: 'GET', path: '/', status: 200,
+      statusSource: 'edge_access', auditStatus: 200 }, edge: {
+      target: 'access.example.invalid', disposition: 'observed_passed', statusVerified: true,
+      originReached: true, ruleIds: ['920320'], ruleSummary: 'Request missing User-Agent header',
+    } })), true);
+  await alerts.draining;
+  assert.match(requests[0].text, /WAF action: Origin returned a final 2xx\/3xx response/);
+  assert.match(requests[0].text, /Matched: CRS 920320 · Request missing User-Agent header/);
+  assert.doesNotMatch(requests[0].text, /prove access or exploitation/);
+}));
+
 test('historical WAF imports populate monitoring without generating Telegram alerts', async () => temporary(async (directory) => {
   const requests = [];
   const alerts = new TelegramAlerts(directory, { ...credentials(directory), retryDelays: [0],

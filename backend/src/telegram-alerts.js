@@ -139,7 +139,7 @@ function dispositionLabel(disposition) {
 function wafAction(event) {
   const disposition = event.edge?.disposition;
   if (disposition === 'observed_passed') return event.edge?.statusVerified
-    ? 'WAF allowed the request; the final client response is verified'
+    ? 'Origin returned a final 2xx/3xx response'
     : event.edge?.mode === 'DetectionOnly' ? 'Observed only (DetectionOnly); WAF did not interrupt the request'
       : 'Observed only; WAF did not interrupt the request';
   if (disposition === 'origin_rejected') return event.edge?.statusVerified
@@ -158,7 +158,7 @@ function wafMeaning(event) {
   if (event.edge?.statusVerified !== true) return event.http?.status !== null
     ? `ModSecurity audit reported HTTP ${event.http.status}; automatic edge correlation is pending.`
     : 'Automatic edge correlation is pending.';
-  if (disposition === 'observed_passed') return 'The request was not blocked; that alone does not prove access or exploitation.';
+  if (disposition === 'observed_passed') return null;
   if (disposition === 'origin_rejected') return 'The application or origin rejected the request.';
   if (disposition === 'origin_rate_limited') return 'The application or origin applied rate limiting.';
   if (disposition === 'origin_error') return 'The application or origin returned a server error.';

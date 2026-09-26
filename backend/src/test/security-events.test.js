@@ -116,6 +116,8 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(client, /WAF audit HTTP/);
   assert.match(client, /Edge HTTP/);
   assert.match(client, /Final HTTP/);
+  assert.match(client, /Origin returned final 2xx\/3xx/);
+  assert.doesNotMatch(client, /that alone does not prove access or exploitation/);
   assert.match(client, /securityMap/);
   assert.match(client, /SecurityGlobe\.create/);
   assert.match(client, /Threat connection globe/);
@@ -148,7 +150,7 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(html, /security-globe\.js\?v=99/);
   assert.match(html, /Enable public click debugger/);
   assert.match(client, /scene\.diagnostics = \{ clickDebugger: elements\.clickDebugger\.checked \}/);
-  assert.match(html, /admin\.js\?v=112/);
+  assert.match(html, /admin\.js\?v=113/);
   const globe = fs.readFileSync(path.join(__dirname, '../security-globe.js'), 'utf8');
   assert.match(globe, /cameraSequence/);
   assert.match(globe, /routeDuration/);

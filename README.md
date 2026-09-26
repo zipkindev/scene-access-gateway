@@ -195,6 +195,9 @@ policy rejected`, and `origin not reached`; other DetectionOnly findings remain
 separately for diagnosis. Normalized findings include a safe CRS rule
 explanation plus the sanitized method, path, result provenance, action, and WAF
 mode without retaining request headers, query values, or bodies.
+Verified final `2xx`/`3xx` findings describe the origin result and the exact
+matched rule (for example, a missing User-Agent header); they do not add a
+generic statement about exploitation to a normal response.
 
 Path-aware presentation distinguishes remote-service enumeration from generic
 protocol anomalies. Recognized Microsoft RDP Web, Exchange/OWA, SonicWall,

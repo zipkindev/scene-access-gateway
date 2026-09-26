@@ -925,7 +925,7 @@ function readableSecurityValue(value) {
 function wafDispositionLabel(disposition, mode = null, statusVerified = false) {
   const labels = {
     observed_passed: statusVerified
-      ? 'WAF allowed; final client response verified'
+      ? 'Origin returned final 2xx/3xx'
       : mode === 'DetectionOnly' ? 'Observed only (DetectionOnly; audit reported 2xx/3xx)'
         : 'Observed only (WAF audit reported 2xx/3xx)',
     origin_rejected: statusVerified ? 'Origin returned final 4xx' : 'WAF audit reported 4xx; final edge status unverified',
@@ -945,7 +945,7 @@ function wafOutcomeMeaning(event) {
       : 'Automatic edge correlation is pending';
   }
   if (event.edge?.disposition === 'observed_passed') {
-    return 'The WAF did not block this request; that alone does not prove access or exploitation';
+    return null;
   }
   if (event.edge?.disposition === 'origin_rejected') return 'The origin rejected the request';
   if (event.edge?.disposition === 'origin_rate_limited') return 'The origin rate-limited the request';

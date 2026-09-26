@@ -299,6 +299,15 @@ separately as `waf_blocked`. All other non-interrupted findings are
 origin proxy was reached. The final response status, audit-phase status, and
 upstream status remain separate fields.
 
+A verified final `2xx` or `3xx` is presented as the origin's response, not as
+a WAF enforcement decision. The card does not add a generic exploitation
+caveat to an otherwise normal response; it states the concrete reason the WAF
+logged the request. Recognized protocol rules include missing Host or
+User-Agent headers and policy-restricted headers or file extensions. This
+keeps ordinary automated health checks distinguishable from attack-path
+findings without treating a successful application response as suspicious by
+itself.
+
 Recognized remote-access product paths are categorized as
 `service_enumeration` and enriched with the probed family (RDP Web,
 Exchange/OWA, SonicWall, Ivanti/Pulse Secure, Windows remote management, or a

@@ -4,7 +4,10 @@ const net = require('node:net');
 
 const RULES = Object.freeze({
   '913100': { category: 'known_scanner', severity: 'warning', summary: 'Known security scanner signature detected' },
+  '920280': { category: 'protocol_anomaly', severity: 'warning', summary: 'Request missing required Host header' },
+  '920320': { category: 'protocol_anomaly', severity: 'info', summary: 'Request missing User-Agent header' },
   '920350': { category: 'protocol_anomaly', severity: 'warning', summary: 'Numeric IP used as the HTTP Host header' },
+  '920440': { category: 'protocol_anomaly', severity: 'warning', summary: 'URL file extension restricted by policy' },
   '920451': { category: 'protocol_anomaly', severity: 'critical', summary: 'HTTP header restricted by policy' },
   '920500': { category: 'backup_file_probe', severity: 'warning', summary: 'Backup or working file requested' },
   '930130': { category: 'sensitive_file_enumeration', severity: 'critical', summary: 'Restricted or sensitive file requested' },
