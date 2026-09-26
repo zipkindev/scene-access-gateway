@@ -8,7 +8,7 @@ const { applyWafOutcome, presentWafEvent } = require('./waf-rules');
 
 const LEVELS = new Set(['info', 'warning', 'critical']);
 const TYPES = new Set([
-  'portal_visit', 'qr_login_page_opened', 'qr_login_attempt', 'qr_email_delivery',
+  'portal_visit', 'qr_challenge_created', 'qr_login_page_opened', 'qr_login_attempt', 'qr_email_delivery',
   'qr_verified', 'portal_session_created', 'access_request', 'rate_limited',
   'request_rejected', 'suspicious_request', 'waf_finding', 'waf_outcome', 'admin_action',
 ]);
@@ -278,6 +278,8 @@ class SecurityEvents {
         transactionId: /^[A-Za-z0-9_-]{1,128}$/.test(data.edge.transactionId || '')
           ? data.edge.transactionId : null,
         historical: data.edge.historical === true,
+        correlationStatus: ['pending', 'verified', 'unavailable'].includes(data.edge.correlationStatus)
+          ? data.edge.correlationStatus : data.edge.statusVerified === true ? 'verified' : 'unavailable',
       } : null,
     };
     const canonical = JSON.stringify(event);

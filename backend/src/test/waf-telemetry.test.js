@@ -66,6 +66,7 @@ test('WAF audits normalize into one sanitized high-confidence finding', () => {
   assert.equal(value.edge.disposition, 'outcome_unknown');
   assert.equal(value.edge.statusVerified, false);
   assert.equal(value.edge.originReached, null);
+  assert.equal(value.edge.correlationStatus, 'pending');
   assert.deepEqual(value.edge.ruleIds, ['930130']);
   assert.equal(value.edge.ruleSummary, 'Restricted or sensitive file requested');
   assert.equal(value.edge.anomalyScore, 5);
@@ -133,6 +134,7 @@ test('edge access correlation supplies one verified final outcome while preservi
   assert.equal(value.http.upstreamStatus, 404);
   assert.equal(value.edge.statusVerified, true);
   assert.equal(value.edge.originReached, true);
+  assert.equal(value.edge.correlationStatus, 'verified');
   assert.equal(value.edge.disposition, 'origin_rejected');
   assert.equal(value.outcome, 'origin_rejected');
   assert.doesNotThrow(() => validate(value));
@@ -200,6 +202,7 @@ test('collector and ingestor persist, deduplicate, and expose WAF status', () =>
     assert.equal(collector.scan(), 0);
     const normalized = JSON.parse(fs.readFileSync(output, 'utf8').trim());
     assert.equal(normalized.edge.historical, true);
+    assert.equal(normalized.edge.correlationStatus, 'unavailable');
     const security = new SecurityEvents(data, noGeo);
     const ingestor = new WafIngestor(output, security, data);
     security.wafStatus = () => ingestor.status();
@@ -256,6 +259,36 @@ test('collector joins late access evidence and the ledger exposes one corrected 
     assert.equal(visible[0].http.auditStatus, 200);
     assert.equal(visible[0].http.statusSource, 'edge_access');
     assert.equal(visible[0].edge.originReached, true);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('collector backfills retained exact-ID outcomes after prior correlation was missed', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sag-waf-backfill-'));
+  try {
+    const auditRoot = path.join(directory, 'audit');
+    const telemetry = path.join(directory, 'telemetry');
+    fs.mkdirSync(auditRoot);
+    fs.mkdirSync(telemetry);
+    fs.writeFileSync(path.join(auditRoot, 'event.json'), JSON.stringify(audit({ response: { http_code: 200 } })));
+    const accessLog = path.join(auditRoot, 'waf-access.jsonl');
+    fs.writeFileSync(accessLog, '');
+    const output = path.join(telemetry, 'events.jsonl');
+    const stateFile = path.join(telemetry, 'collector-state.json');
+    const first = new WafCollector(auditRoot, output, stateFile, { accessLog, graceMs: 0 });
+    assert.equal(first.scan(), 1);
+    fs.appendFileSync(accessLog, JSON.stringify({ time: '2026-09-23T14:00:00Z',
+      request_id: 'edge_request_01', remote_addr: '203.0.113.42', host: 'access.example.invalid',
+      method: 'GET', uri: '/.env', status: 404, upstream_status: '404' }) + '\n');
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    state.accessOffset = fs.statSync(accessLog).size;
+    delete state.backfillVersion;
+    fs.writeFileSync(stateFile, JSON.stringify(state));
+    const restarted = new WafCollector(auditRoot, output, stateFile, { accessLog, graceMs: 0 });
+    assert.equal(restarted.scan(), 1);
+    const retained = fs.readFileSync(output, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(retained.map((event) => event.source), ['waf', 'waf_outcome']);
+    assert.equal(retained[1].http.status, 404);
+    assert.equal(retained[1].edge.correlationStatus, 'verified');
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 

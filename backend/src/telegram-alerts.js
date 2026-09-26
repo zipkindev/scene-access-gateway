@@ -155,9 +155,12 @@ function wafAction(event) {
 
 function wafMeaning(event) {
   const disposition = event.edge?.disposition;
-  if (event.edge?.statusVerified !== true) return event.http?.status !== null
-    ? `ModSecurity audit reported HTTP ${event.http.status}; automatic edge correlation is pending.`
-    : 'Automatic edge correlation is pending.';
+  if (event.edge?.statusVerified !== true) {
+    if (event.edge?.correlationStatus === 'pending') return 'Automatic edge correlation is pending.';
+    return event.http?.status !== null
+      ? `ModSecurity audit reported HTTP ${event.http.status}; exact final-response evidence is unavailable.`
+      : 'Exact final-response evidence is unavailable.';
+  }
   if (disposition === 'observed_passed') return null;
   if (disposition === 'origin_rejected') return 'The application or origin rejected the request.';
   if (disposition === 'origin_rate_limited') return 'The application or origin applied rate limiting.';

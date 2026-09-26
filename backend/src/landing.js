@@ -414,7 +414,7 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
           if (result.acceptedStep === 'complete') reportSceneClick('Sequence complete · QR confirmed by server', 'accepted');
           else if (result.accepted) reportSceneClick('Point ' + result.acceptedStep + ' confirmed by server', 'accepted');
           else reportSceneClick('Click reached server · sequence reset', 'rejected');
-          if (result.destination === 'torrentharbor') toggleScanView();
+          if (result.destination === 'torrentharbor') { startPortalPoll(); toggleScanView(); }
           else if (result.destination === 'firewall') await openFirewallQr();
         }).catch(() => {
           settleSceneClick(receipt, 'rejected');
@@ -546,7 +546,12 @@ function landingPage(scanQrSvg, token, scriptNonce, configuration = DEFAULT_SCEN
           }).catch(() => {}), 1500);
         setTimeout(() => clearInterval(poll), 900000);
       }
-      const portalPoll = setInterval(() => fetch('/challenge/current', { credentials: 'same-origin' }).then((response) => response.json()).then((result) => { if (result.terminal) { clearInterval(portalPoll); return; } if (result.redirect) location = result.redirect; }).catch(() => {}), 1500);
+      let portalPoll = null;
+      function startPortalPoll() {
+        if (portalPoll) return;
+        portalPoll = setInterval(() => fetch('/challenge/current', { credentials: 'same-origin' }).then((response) => response.json()).then((result) => { if (result.terminal) { clearInterval(portalPoll); portalPoll = null; return; } if (result.redirect) location = result.redirect; }).catch(() => {}), 1500);
+        setTimeout(() => { if (portalPoll) clearInterval(portalPoll); portalPoll = null; }, 900000);
+      }
       // QR expiry is enforced by the challenge endpoints; never expire the Arcade page.
     </script>
   </body>

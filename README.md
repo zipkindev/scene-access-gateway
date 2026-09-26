@@ -74,6 +74,14 @@ source address. MaxMind onboarding, database downloads, update status, and
 credential removal are managed from the same protected console. See
 [security monitoring](docs/security-monitoring.md).
 
+Ordinary page loads are recorded as `page_served`; they do not preallocate an
+authentication challenge. A short-lived QR challenge is created only after the
+server accepts the scene's configured destination sequence. WAF findings are
+presented through a versioned ruleset, including retained events, and distinguish
+verified final responses from historical records whose exact edge evidence is
+unavailable. A bounded upgrade backfill recovers final outcomes when both the
+retained finding and exact-ID edge record still exist.
+
 ![Scene Management passive source intelligence with sanitized RFC-reserved evidence](docs/media/scene-management-source-intelligence.png)
 
 Selecting a source can open a passive assessment combining ledger evidence,
@@ -181,8 +189,9 @@ the Scene Management policy.
 
 Finding severity is derived from the matched CRS rule severity and
 high-confidence attack category, not from a response code. In the UI and
-Telegram, audit status is labeled `WAF audit HTTP` while automatic edge
-correlation is pending. Once joined, `Final HTTP` is the client response,
+Telegram, audit status is labeled `WAF audit HTTP`. The collector waits through
+a short correlation window before exposing an unresolved record. Once joined,
+`Final HTTP` is the client response,
 `audit phase HTTP` remains separate evidence, and upstream reachability is
 explicit. A non-interrupted audit
 `2xx` does not prove that the client received a success response,
@@ -191,8 +200,9 @@ application. The event model reports detection, enforcement, and origin
 reachability separately. A WAF interruption is recorded as `WAF blocked`; the
 numeric-Host default-server contract is recorded as `Edge HTTP 444`, `edge
 policy rejected`, and `origin not reached`; other DetectionOnly findings remain
-`final outcome unverified` only while correlation is pending. The audit-phase status is retained
-separately for diagnosis. Normalized findings include a safe CRS rule
+`final outcome unverified` with correlation marked `unavailable` when exact
+edge evidence cannot be found. They are not left indefinitely pending. The
+audit-phase status is retained separately for diagnosis. Normalized findings include a safe CRS rule
 explanation plus the sanitized method, path, result provenance, action, and WAF
 mode without retaining request headers, query values, or bodies.
 Verified final `2xx`/`3xx` findings describe the origin result and the exact

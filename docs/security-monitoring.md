@@ -13,7 +13,8 @@ never reach an application route.
 
 ## Recorded events
 
-- portal visits that create a QR challenge;
+- portal page views, recorded as `page_served` without allocating a QR challenge;
+- QR challenges created only after the server accepts the configured destination sequence;
 - valid-format QR login page opens;
 - rejected and accepted login/email-delivery outcomes;
 - successful email confirmation and portal-session creation;
@@ -279,11 +280,13 @@ returned a denial or not-found response. Severity comes from the matched CRS
 rule and detection confidence rather than status. Cards and Telegram alerts
 include the sanitized request, audit-status provenance, CRS IDs, safe rule
 descriptions, and a plain-English action and meaning. Raw headers, query
-values, bodies, cookies, and authorization data remain excluded. If the access
-record is briefly delayed, the card says automatic correlation is pending. A
+values, bodies, cookies, and authorization data remain excluded. The collector
+holds a finding for a short correlation grace period before it is visible. A
 later exact-ID match is stored as a signed outcome correction and folded into
 the original card, CSV row, and API result; operators never need to compare two
-visible events. Timestamp-only guesses are not used. Telegram incidents are keyed by source
+visible events. If no exact match is available after that window, the result is
+terminally labeled `unavailable`, not left `pending`. Timestamp-only guesses are
+not used. Telegram incidents are keyed by source
 fingerprint, target, and attack category. The first qualifying event alerts
 immediately, duplicates accumulate, and ongoing activity re-alerts at the
 configured persistence interval. A quiet interval closes the active incident.
@@ -316,6 +319,23 @@ not brute force, unless authentication submissions or credential attempts are
 also observed. Sensitive-file, backup-file, and framework-administration paths
 remain distinct so the later hardening review can separate edge noise from
 requests that may require application controls.
+
+Retained WAF findings are reclassified at read time with the current local
+presentation ruleset. This safely updates severity, category, path behavior,
+rule summaries, deterministic edge-policy outcomes, and correlation state
+without rewriting the signed append-only ledger. Each API event and CSV row
+identifies the presentation ruleset used. A final response is never inferred
+from a timestamp or audit-phase status; historical response fields are updated
+only by retained exact request-ID evidence. On upgrade, the collector performs
+one bounded backfill across its retained normalized findings and current edge
+correlation log. Exact matches become signed outcome corrections; records whose
+edge evidence has rotated away remain explicitly unavailable.
+
+The public page and the authentication challenge have separate lifecycles. A
+normal `GET /` sets only the short-lived browser-binding cookie and records
+`page_served`. Click progress is transient and browser-bound. The application
+creates and records `qr_challenge_created` only after the configured sequence
+selects a destination; only then does it expose a QR and poll for approval.
 
 `Export filtered CSV` uses the selected time range and all active stream,
 severity, event, category, location, source, method, status, and disposition

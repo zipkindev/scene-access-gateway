@@ -940,9 +940,10 @@ function wafDispositionLabel(disposition, mode = null, statusVerified = false) {
 
 function wafOutcomeMeaning(event) {
   if (event.edge?.statusVerified !== true) {
+    if (event.edge?.correlationStatus === 'pending') return 'Automatic edge correlation is pending';
     return event.http?.status !== null
-      ? `ModSecurity audit reported HTTP ${event.http.status}; automatic edge correlation is pending`
-      : 'Automatic edge correlation is pending';
+      ? `ModSecurity audit reported HTTP ${event.http.status}; exact final-response evidence is unavailable`
+      : 'Exact final-response evidence is unavailable';
   }
   if (event.edge?.disposition === 'observed_passed') {
     return null;
@@ -1997,6 +1998,7 @@ function securityEventRow(event) {
       : event.edge.originReached === true ? ' · origin reached' : ' · origin reach unverified')
     + (event.edge.anomalyScore !== null ? ' · score ' + event.edge.anomalyScore : '')
     + (event.edge.historical ? ' · historical import' : ''));
+  if (event.classificationVersion) detail.append(' · classified with ruleset ' + event.classificationVersion);
   const meaning = event.type === 'waf_finding' ? wafOutcomeMeaning(event) : null;
   if (meaning) detail.append(' · ' + meaning);
   if (event.requestId) detail.append(' · request ' + event.requestId);

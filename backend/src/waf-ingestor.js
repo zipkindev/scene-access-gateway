@@ -42,6 +42,8 @@ function validate(value) {
     || value.http.upstreamStatus !== undefined && value.http.upstreamStatus !== null
       && !Number.isInteger(value.http.upstreamStatus)
     || value.edge.statusVerified !== undefined && typeof value.edge.statusVerified !== 'boolean'
+    || value.edge.correlationStatus !== undefined
+      && !['pending', 'verified', 'unavailable'].includes(value.edge.correlationStatus)
     || value.edge.originReached !== undefined && value.edge.originReached !== null
       && typeof value.edge.originReached !== 'boolean'
     || typeof value.edge.originReached === 'boolean' && value.edge.statusVerified !== true

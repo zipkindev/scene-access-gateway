@@ -69,7 +69,7 @@ function correlateAudit(event, access) {
     auditStatus: Number.isInteger(auditStatus) ? auditStatus : null,
     upstreamStatus: access.http.upstreamStatus };
   event.edge = { ...event.edge, disposition, statusVerified: true,
-    originReached: interrupted ? false : access.edge.originReached };
+    originReached: interrupted ? false : access.edge.originReached, correlationStatus: 'verified' };
   event.outcome = disposition;
   event.requestId = access.transactionId;
   return event;
@@ -80,7 +80,7 @@ function outcomeEvent(access) {
   return { version: 1, source: 'waf_outcome', transactionId: access.transactionId,
     requestId: access.transactionId, at: access.at, sourceIp: access.sourceIp,
     http: { ...access.http }, edge: { ...access.edge, disposition,
-      transactionId: access.transactionId }, outcome: disposition };
+      transactionId: access.transactionId, correlationStatus: 'verified' }, outcome: disposition };
 }
 
 function normalizeAudit(value, observedAt = new Date(), historical = false) {
@@ -123,6 +123,7 @@ function normalizeAudit(value, observedAt = new Date(), historical = false) {
       anomalyScore: scores.length ? Math.max(...scores) : null,
       interrupted, statusVerified: interrupted || edgeRejected,
       originReached: interrupted || edgeRejected ? false : null, transactionId: uniqueId,
+      correlationStatus: interrupted || edgeRejected ? 'verified' : uniqueId ? 'pending' : 'unavailable',
       historical: historical === true },
   };
 }
@@ -167,6 +168,33 @@ class WafCollector {
       ? this.state.accessOffset : 0;
     this.initializing = this.state.initialized !== true;
     if (!this.emitted.size && this.processed.size) this._recoverEmittedIds();
+  }
+
+  _backfillRetainedOutcomes() {
+    if (this.state.backfillVersion === 1 || !fs.existsSync(this.outputFile)
+      || !fs.existsSync(this.accessLog)) return 0;
+    const eligible = new Set();
+    for (const line of fs.readFileSync(this.outputFile, 'utf8').split('\n').filter(Boolean)) {
+      let event;
+      try { event = JSON.parse(line); } catch (_) { continue; }
+      if (event.source === 'waf' && event.edge?.statusVerified !== true && event.transactionId) {
+        eligible.add(event.transactionId);
+      } else if (event.source === 'waf_outcome' && event.transactionId) {
+        this.corrected.add(event.transactionId);
+      }
+    }
+    let emitted = 0;
+    for (const line of fs.readFileSync(this.accessLog, 'utf8').split('\n').filter(Boolean)) {
+      let access;
+      try { access = accessOutcome(JSON.parse(line)); } catch (_) { access = null; }
+      if (!access || !eligible.has(access.transactionId) || this.corrected.has(access.transactionId)) continue;
+      this._append(outcomeEvent(access));
+      this.corrected.add(access.transactionId);
+      emitted += 1;
+    }
+    this.state.backfillVersion = 1;
+    this.state.backfilledOutcomes = emitted;
+    return emitted;
   }
 
   _recoverEmittedIds() {
@@ -234,6 +262,7 @@ class WafCollector {
     let emitted = 0;
     fs.mkdirSync(path.dirname(this.outputFile), { recursive: true, mode: 0o700 });
     try {
+      emitted += this._backfillRetainedOutcomes();
       emitted += this._readAccess();
       for (const file of filesBelow(this.auditRoot, 100000, new Set([this.accessLog]))) {
         const relative = path.relative(this.auditRoot, file);
@@ -255,6 +284,7 @@ class WafCollector {
       const cutoff = this.now().getTime() - this.graceMs;
       for (const [id, pending] of this.pending) {
         if (Date.parse(pending.firstSeenAt) > cutoff) continue;
+        pending.event.edge.correlationStatus = 'unavailable';
         this._append(pending.event);
         this.pending.delete(id);
         this.emitted.add(id);
@@ -263,6 +293,7 @@ class WafCollector {
       while (this.processed.size > 50000) this.processed.delete(this.processed.values().next().value);
       while (this.pending.size > 5000) {
         const id = this.pending.keys().next().value;
+        this.pending.get(id).event.edge.correlationStatus = 'unavailable';
         this._append(this.pending.get(id).event);
         this.pending.delete(id);
         this.emitted.add(id);
@@ -276,6 +307,7 @@ class WafCollector {
         pending: [...this.pending.values()].slice(-5000), access: [...this.access.values()].slice(-20000),
         emitted: [...this.emitted], corrected: [...this.corrected], accessOffset: this.accessOffset,
         lastScanAt: this.now().toISOString(),
+        backfillVersion: 1, backfilledOutcomes: this.state.backfilledOutcomes || 0,
         lastEventAt: this.state.lastEventAt || null, lastError: null };
     } catch (error) {
       this.state = { ...this.state, version: 2, initialized: !this.initializing,

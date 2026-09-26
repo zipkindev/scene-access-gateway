@@ -116,7 +116,7 @@ test('WAF Telegram alerts distinguish edge rejection from the audit-phase status
     outcome: 'edge_rejected', http: { method: 'GET', path: '/RDWeb', status: 444,
       statusSource: 'edge_policy', auditStatus: 200 }, edge: {
       target: '75.178.84.162', disposition: 'edge_rejected', mode: 'DetectionOnly',
-      statusVerified: true, originReached: false,
+      statusVerified: true, originReached: false, correlationStatus: 'verified',
       ruleIds: ['920350'], ruleSummary: 'Numeric IP used as the HTTP Host header',
       behaviorSummary: 'Microsoft Remote Desktop Web service enumeration',
     } })), true);

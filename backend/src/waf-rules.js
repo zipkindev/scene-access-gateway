@@ -20,6 +20,7 @@ const CATEGORY_PRIORITY = [
   'framework_admin_probe', 'service_enumeration', 'protocol_anomaly', 'automated_scanner_probe',
 ];
 const SEVERITY_RANK = { info: 0, warning: 1, critical: 2 };
+const PRESENTATION_RULESET = '2026-09-26.1';
 const SERVICE_ENUMERATION = [
   { pattern: /^\/(?:Remote(?:\/|$)|RDWeb(?:\/|$))/i,
     summary: 'Microsoft Remote Desktop Web service enumeration' },
@@ -112,6 +113,7 @@ function pathFinding(pathname) {
 
 function presentWafEvent(event) {
   if (event?.type !== 'waf_finding' || event.integrityValid === false) return event;
+  event.classificationVersion = PRESENTATION_RULESET;
   const ids = Array.isArray(event.edge?.ruleIds) ? event.edge.ruleIds.map(String) : [];
   if (!ids.length) return event;
   const known = ids.map((id) => RULES[id]).filter(Boolean);
@@ -145,13 +147,18 @@ function presentWafEvent(event) {
     event.edge.disposition = 'edge_rejected';
     event.edge.statusVerified = true;
     event.edge.originReached = false;
+    event.edge.correlationStatus = 'verified';
     event.outcome = 'edge_rejected';
   } else if (event.edge?.statusVerified !== true) {
     event.edge.disposition = 'outcome_unknown';
     event.edge.originReached = null;
+    event.edge.correlationStatus = 'unavailable';
     event.outcome = 'outcome_unknown';
   } else if (event.edge?.disposition === 'waf_blocked') {
     event.edge.originReached = false;
+    event.edge.correlationStatus = 'verified';
+  } else if (event.edge?.statusVerified === true) {
+    event.edge.correlationStatus = 'verified';
   }
   return event;
 }
@@ -168,12 +175,12 @@ function applyWafOutcome(event, correction) {
     statusSource: 'edge_access', auditStatus,
     upstreamStatus: correction.http?.upstreamStatus ?? null };
   event.edge = { ...event.edge, disposition: correction.edge.disposition,
-    statusVerified: true, originReached: correction.edge.originReached };
+    statusVerified: true, originReached: correction.edge.originReached, correlationStatus: 'verified' };
   event.outcome = correction.edge.disposition;
   event.requestId = correction.requestId || event.requestId;
   return event;
 }
 
-module.exports = { CATEGORY_PRIORITY, RULES, findingCategory, findingSeverity, messageCategory,
+module.exports = { CATEGORY_PRIORITY, PRESENTATION_RULESET, RULES, findingCategory, findingSeverity, messageCategory,
   applyWafOutcome, defaultHostRejection, pathFinding, presentWafEvent,
   ruleSeverity, ruleSummary, serviceEnumeration };

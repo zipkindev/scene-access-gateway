@@ -253,14 +253,13 @@ async function handleRequest(req, res) {
   }
   if (url.pathname === '/') {
     if (!['GET', 'HEAD'].includes(req.method)) return send(res, 405, { Allow: 'GET, HEAD', 'Content-Type': 'text/html; charset=utf-8' }, methodPage());
-    const [browserId, browserCookie] = browser(req); const token = store.createChallenge(tokenHash(browserId), Date.now() + CHALLENGE_TTL);
+    const [, browserCookie] = req.method === 'GET' ? browser(req) : [null, null];
     const nonce = crypto.randomBytes(18).toString('base64');
     const publicScene = sceneStore.active().scene;
     if (!firewallActive()) publicScene.hotspots = publicScene.hotspots.filter((item) => item.destinationId !== 'firewall');
     const body = landingPage(null, null, nonce, publicScene, backgrounds());
-    const challengeCookie = portalChallengeCookie(token);
-    if (req.method === 'GET') security('portal_visit', req, url, { outcome: 'challenge_created', status: 200, destination: 'torrentharbor' });
-    return send(res, 200, { 'Content-Security-Policy': `default-src 'none'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'self' ${FIREWALL_ORIGIN}; frame-ancestors 'none'`, 'Referrer-Policy': 'strict-origin', 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': browserCookie ? [browserCookie, challengeCookie] : challengeCookie }, req.method === 'HEAD' ? '' : body);
+    if (req.method === 'GET') security('portal_visit', req, url, { outcome: 'page_served', status: 200 });
+    return send(res, 200, { 'Content-Security-Policy': `default-src 'none'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'self' ${FIREWALL_ORIGIN}; frame-ancestors 'none'`, 'Referrer-Policy': 'strict-origin', 'Content-Type': 'text/html; charset=utf-8', ...(browserCookie ? { 'Set-Cookie': browserCookie } : {}) }, req.method === 'HEAD' ? '' : body);
   }
   if (url.pathname === '/challenge/current/qr' && req.method === 'GET') {
     const [token, challenge] = currentChallenge(req);
@@ -276,39 +275,39 @@ async function handleRequest(req, res) {
   }
   if (url.pathname === '/api/scene/hit' && req.method === 'POST') {
     if (!sameOrigin(req)) return send(res, 403, {}, '');
-    let [token, challenge] = currentChallenge(req);
-    const renewalCookies = [];
-    if (!challenge || challenge.status !== 'pending' || Date.parse(challenge.expiresAt) <= Date.now()) {
-      const [browserId, browserCookie] = browser(req);
-      token = store.createChallenge(tokenHash(browserId), Date.now() + CHALLENGE_TTL);
-      challenge = store.getChallenge(token, tokenHash(browserId));
-      if (browserCookie) renewalCookies.push(browserCookie);
-      renewalCookies.push(portalChallengeCookie(token));
-    }
+    const [browserId, browserCookie] = browser(req);
+    const responseCookies = browserCookie ? [browserCookie] : [];
     let point;
     try { point = await readJson(req); } catch (_) { return send(res, 400, {}, ''); }
     const active = sceneStore.active();
-    const session = clickSession(token, active.activationId || active.revisionId);
+    const session = clickSession(browserId, active.activationId || active.revisionId);
     const result = advanceSceneClick(active.scene, point.x, point.y,
       point.width, point.height, firewallActive(), session.progress, Date.now());
     session.progress = result.progress;
     if (result.destination && needsSequence(active.scene, result.destination)) session.unlocks.add(result.destination);
     const destination = result.destination;
+    if (destination === 'torrentharbor') {
+      let [token, challenge] = currentChallenge(req);
+      if (!challenge || challenge.status !== 'pending' || Date.parse(challenge.expiresAt) <= Date.now()) {
+        token = store.createChallenge(tokenHash(browserId), Date.now() + CHALLENGE_TTL);
+        responseCookies.push(portalChallengeCookie(token));
+        security('qr_challenge_created', req, url, { outcome: 'challenge_created', status: 200,
+          destination: 'torrentharbor' });
+      }
+      clickSessions.set(token, session);
+    }
     const accepted = Boolean(destination || result.progress);
     const acceptedStep = result.progress ? result.progress.next : (destination ? 'complete' : 0);
     return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8',
-      ...(renewalCookies.length ? { 'Set-Cookie': renewalCookies } : {}) },
+      ...(responseCookies.length ? { 'Set-Cookie': responseCookies } : {}) },
     JSON.stringify({ destination, accepted, acceptedStep }));
   }
   if (url.pathname === '/api/challenge/firewall' && req.method === 'POST') {
     if (!firewallActive()) return send(res, 404, {}, '');
     if (!sameOrigin(req)) return send(res, 403, {}, '');
-    const [pageToken, pageChallenge] = currentChallenge(req);
-    if (needsSequence(sceneStore.active().scene, 'firewall') &&
-        (!pageChallenge || pageChallenge.status !== 'pending' ||
-         Date.parse(pageChallenge.expiresAt) <= Date.now() ||
-         !sequenceUnlocked(pageToken, sceneStore.active(), 'firewall'))) return send(res, 404, {}, '');
     const [browserId, browserCookie] = browser(req);
+    if (needsSequence(sceneStore.active().scene, 'firewall') &&
+        !sequenceUnlocked(browserId, sceneStore.active(), 'firewall')) return send(res, 404, {}, '');
     const priorToken = cookie(req, 'portal_firewall_challenge');
     const prior = /^[A-Za-z0-9_-]{43}$/.test(priorToken)
       ? store.getChallenge(priorToken, tokenHash(browserId)) : null;
@@ -317,6 +316,8 @@ async function handleRequest(req, res) {
     if (!reusable && !store.allowAttempt(ip(req), 'firewall-challenge', 12, 100)) return send(res, 429, {}, '');
     const token = reusable ? priorToken : store.createChallenge(tokenHash(browserId), Date.now() + CHALLENGE_TTL, 'firewall');
     const qr = await QRCode.toString(`${ORIGIN}/login/${token}`, { type: 'svg', errorCorrectionLevel: 'H', margin: 1 });
+    if (!reusable) security('qr_challenge_created', req, url, { outcome: 'challenge_created',
+      status: 200, destination: 'firewall' });
     const challengeCookie = `portal_firewall_challenge=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`;
     return send(res, 200, { 'Content-Type': 'application/json', 'Set-Cookie': browserCookie ? [browserCookie, challengeCookie] : challengeCookie }, JSON.stringify({ qr, token }));
   }

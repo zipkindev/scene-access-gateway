@@ -111,7 +111,8 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(client, /Scene Management/);
   assert.match(client, /GeoIP databases updated/);
   assert.match(client, /edge policy rejected · origin not reached/);
-  assert.match(client, /automatic edge correlation is pending/);
+  assert.match(client, /Automatic edge correlation is pending/);
+  assert.match(client, /exact final-response evidence is unavailable/i);
   assert.match(client, /Final edge and application outcome unverified/);
   assert.match(client, /WAF audit HTTP/);
   assert.match(client, /Edge HTTP/);
@@ -150,7 +151,7 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(html, /security-globe\.js\?v=99/);
   assert.match(html, /Enable public click debugger/);
   assert.match(client, /scene\.diagnostics = \{ clickDebugger: elements\.clickDebugger\.checked \}/);
-  assert.match(html, /admin\.js\?v=113/);
+  assert.match(html, /admin\.js\?v=114/);
   const globe = fs.readFileSync(path.join(__dirname, '../security-globe.js'), 'utf8');
   assert.match(globe, /cameraSequence/);
   assert.match(globe, /routeDuration/);
@@ -177,7 +178,22 @@ test('stored WAF protocol findings are re-ranked for presentation without rewrit
   assert.equal(listed[0].edge.disposition, 'edge_rejected');
   assert.equal(listed[0].edge.originReached, false);
   assert.equal(listed[0].edge.ruleSummary, 'Numeric IP used as the HTTP Host header');
+  assert.equal(listed[0].edge.correlationStatus, 'verified');
+  assert.equal(listed[0].classificationVersion, '2026-09-26.1');
   assert.equal(fs.readFileSync(path.join(directory, 'security-events', written.at.slice(0, 10) + '.jsonl'), 'utf8'), stored);
+}));
+
+test('retained unverified WAF findings are terminally unavailable rather than indefinitely pending', () => temporary((directory) => {
+  const events = new SecurityEvents(directory, noGeo);
+  events.record('waf_finding', { ip: '192.168.1.20', severity: 'info',
+    category: 'protocol_anomaly', outcome: 'outcome_unknown',
+    http: { method: 'GET', path: '/', status: 200, statusSource: 'modsecurity_audit' },
+    edge: { target: 'arcade.example.invalid', disposition: 'outcome_unknown', ruleIds: ['920320'],
+      statusVerified: false, originReached: null, transactionId: 'legacy_request_01' } });
+  const listed = events.list({ type: 'waf_finding' });
+  assert.equal(listed[0].edge.correlationStatus, 'unavailable');
+  assert.equal(listed[0].edge.statusVerified, false);
+  assert.equal(listed[0].edge.ruleSummary, 'Request missing User-Agent header');
 }));
 
 test('security events persist bounded structured metadata and hash identities', () => temporary((directory) => {
@@ -356,6 +372,8 @@ test('authenticated Scene Management exposes summary and redacted events', async
     assert.match(csv.body, /"audit_http_status"/);
     assert.match(csv.body, /"upstream_http_status"/);
     assert.match(csv.body, /"origin_reached"/);
+    assert.match(csv.body, /"correlation_status"/);
+    assert.match(csv.body, /"classification_ruleset"/);
     assert.match(csv.body, /"access_request"/);
     assert.doesNotMatch(csv.body, /private@example\.com/);
     const invalidCsv = await invoke(handler, '/api/security/events.csv?limit=1', { 'x-scene-admin': 'owner' });

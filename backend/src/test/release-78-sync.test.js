@@ -58,7 +58,8 @@ test('release 78 public source retains final challenge, score, and CRT contracts
   const carousel = source('future-game-carousel.js');
   assert.match(landing, /future-wolf3d-crt\.js\?v=78/);
   assert.match(landing, /future-game-carousel\.js\?v=106/);
-  assert.match(landing, /if \(result\.terminal\) \{ clearInterval\(portalPoll\); return; \}/);
+  assert.match(landing, /function startPortalPoll\(\)/);
+  assert.match(landing, /if \(result\.terminal\) \{ clearInterval\(portalPoll\); portalPoll = null; return; \}/);
   assert.match(landing, /let clickQueue = Promise\.resolve\(\)/);
   assert.match(landing, /clickQueue = clickQueue\.then/);
   assert.match(landing, /function queueSceneHit\(clientX, clientY\)/);
@@ -71,6 +72,9 @@ test('release 78 public source retains final challenge, score, and CRT contracts
   assert.match(server, /url\.pathname === '\/api\/arcade\/scores'/);
   assert.match(server, /JSON\.stringify\(\{ terminal: true \}\)/);
   assert.match(server, /portalChallengeCookie\(token\)/);
+  assert.match(server, /outcome: 'page_served'/);
+  assert.match(server, /security\('qr_challenge_created'/);
+  assert.doesNotMatch(server, /store\.createChallenge\(tokenHash\(browserId\)[^\n]+\n\s*const nonce/);
   assert.match(server, /JSON\.stringify\(\{ destination, accepted, acceptedStep \}\)/);
   for (const game of ['fusion', 'classic2048', 'minesweeper', 'memory', 'lights',
     'treasure', 'knight', 'pegs', 'reversi', 'four', 'circuit']) {
