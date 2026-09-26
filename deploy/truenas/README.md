@@ -27,9 +27,46 @@ must also preserve the security-observability controls described in
 [`docs/security-monitoring.md`](../../docs/security-monitoring.md): JSON access
 records with both edge and upstream `X-Request-ID` values, restricted log
 retention, a per-source request zone, a concurrent-connection zone, explicit
-429 handling, body limits, and route-specific method restrictions. Confirm the
-TLS edge overwrites client-IP headers before using an address as a rate-limit
-or incident-response key.
+429 handling, normalized routes without tokens or queries, public management
+route denial, probe denials, compression, body/time limits, and route-specific
+method restrictions. Confirm the TLS edge overwrites client-IP headers before
+using an address as a rate-limit or incident-response key. Remove client-sent
+management trust headers and route trusted management calls over the private
+backend network.
+
+The target overlay must remain consistent with
+[`deploy/applications.json`](../applications.json). For each protected app,
+verify the declared host/path, upstream TLS identity, origin rewrite, cookies,
+browser-policy sources, Authentik/QR behavior, and negative-route response.
+External browser URLs must remain standard HTTPS on port 443 even when NAT
+forwards them to a different private WAF listener port. Keep that transport
+port out of QR actions, redirects, CSP sources, forwarded public hosts, and
+upstream location rewrites.
+Target-only WAF exceptions still need the same exact rule/path/method,
+rationale, review date, and journey evidence as the tracked contract.
+
+Keep new WAF rules in observation mode through the validation matrix, then
+enable high-confidence denials incrementally. Preserve the portable one-day
+HSTS starter policy at the TLS edge; do not lengthen it or add
+`includeSubDomains` or `preload` until every covered hostname and
+certificate-renewal path has been reviewed.
+
+The reusable WAF image, Nginx templates, and shared-network-namespace Compose
+pattern are tracked in [`deploy/waf/`](../waf/README.md). In that pattern the
+WAF owns the published TLS listener and forwards only to a loopback listener in
+the separate hardened origin Nginx container. TrueNAS overrides must supply the
+hostname allowlist, one allowed health-check host, TLS mount, protected raw
+audit and normalized telemetry directories, origin configuration, published
+port, and certificate-reloader settings. Keep those target values ignored. Do
+not expose the loopback origin
+listener or make the backend directly reachable.
+
+The baseline WAF policy is OWASP CRS 4.29.0 on ModSecurity 3.0.16 in
+`DetectionOnly`. Audit parts `AHZ` exclude request headers, cookies,
+authorization values, request/response bodies, and uploads. The tracked
+networkless telemetry sidecar normalizes those audits for Scene Management and
+Telegram without exposing raw audit content. Mount its normalized feed
+read-only into the portal backend; keep raw audits available only to operators.
 
 Telegram alerting is optional. When enabled, merge `compose.telegram.yaml`
 after reviewing the target's outbound network policy. The overlay attaches the

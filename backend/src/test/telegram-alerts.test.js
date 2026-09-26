@@ -43,6 +43,18 @@ test('policy validation is strict and defaults remain disabled', () => {
   assert.throws(() => validatePolicy({ ...DEFAULT_POLICY, quietHours: { start: '25:00', end: '07:00' } }), /Invalid Telegram policy/);
 });
 
+test('version 1 scanner policies migrate to the corresponding WAF categories', () => {
+  const legacy = validatePolicy({ ...DEFAULT_POLICY, version: 1,
+    categories: ['automated_scanner_probe', 'unexpected_http_method'] });
+  assert.equal(legacy.version, 3);
+  assert.ok(legacy.categories.includes('sensitive_file_enumeration'));
+  assert.ok(legacy.categories.includes('backup_file_probe'));
+  assert.ok(legacy.categories.includes('framework_admin_probe'));
+  assert.ok(legacy.categories.includes('known_scanner'));
+  assert.ok(legacy.categories.includes('service_enumeration'));
+  assert.ok(legacy.categories.includes('protocol_anomaly'));
+});
+
 test('matching events aggregate, redact, cool down, and deliver asynchronously', async () => temporary(async (directory) => {
   const requests = [];
   const alerts = new TelegramAlerts(directory, { ...credentials(directory), retryDelays: [0],
@@ -54,7 +66,7 @@ test('matching events aggregate, redact, cool down, and deliver asynchronously',
   await alerts.draining;
   assert.equal(requests.length, 1);
   assert.match(requests[0].url, /^https:\/\/api\.telegram\.org\/bot123456:/);
-  assert.match(requests[0].body.text, /Observed: 2/);
+  assert.match(requests[0].body.text, /Observed since last alert: 2 · total: 2/);
   assert.match(requests[0].body.text, /203\.0\.113\.…/);
   assert.doesNotMatch(requests[0].body.text, /203\.0\.113\.42/);
   assert.equal(alerts.enqueue(event()), false);
@@ -64,8 +76,106 @@ test('matching events aggregate, redact, cool down, and deliver asynchronously',
   await assert.rejects(() => alerts.test(), /rate limited/);
   const state = alerts.state();
   assert.equal(state.active, true);
+  assert.equal(state.incidents.active, 1);
   assert.equal(JSON.stringify(state).includes('123456:'), false);
   assert.equal(JSON.stringify(state).includes('-1001234567890'), false);
+}));
+
+test('persistent incidents re-alert after the configured interval and separate targets', async () => temporary(async (directory) => {
+  const requests = [];
+  let now = new Date('2026-09-23T03:00:00.000Z');
+  const alerts = new TelegramAlerts(directory, { ...credentials(directory), retryDelays: [0], now: () => now,
+    fetch: async (_url, options) => { requests.push(JSON.parse(options.body)); return { ok: true, status: 200 }; } });
+  alerts.updatePolicy({ ...DEFAULT_POLICY, enabled: true, countThreshold: 1,
+    cooldownSeconds: 300, persistentReminderSeconds: 900, incidentQuietSeconds: 1800 });
+  const finding = event({ category: 'sensitive_file_enumeration', edge: {
+    target: 'access.example.invalid', disposition: 'origin_rejected' } });
+  assert.equal(alerts.enqueue(finding), true);
+  await alerts.draining;
+  now = new Date('2026-09-23T03:05:00.000Z');
+  assert.equal(alerts.enqueue(finding), false);
+  now = new Date('2026-09-23T03:15:00.000Z');
+  assert.equal(alerts.enqueue({ ...finding, edge: { ...finding.edge, disposition: 'origin_rate_limited' } }), true);
+  await alerts.draining;
+  assert.equal(requests.length, 2);
+  assert.match(requests[1].text, /total: 3/);
+  assert.match(requests[1].text, /verified final 4xx 2/);
+  assert.match(requests[1].text, /verified final 429 1/);
+  assert.equal(alerts.enqueue({ ...finding, edge: { ...finding.edge, target: 'arcade.example.invalid' } }), true);
+  await alerts.draining;
+  assert.equal(requests.length, 3);
+}));
+
+test('WAF Telegram alerts distinguish edge rejection from the audit-phase status', async () => temporary(async (directory) => {
+  const requests = [];
+  const alerts = new TelegramAlerts(directory, { ...credentials(directory), retryDelays: [0],
+    fetch: async (_url, options) => { requests.push(JSON.parse(options.body)); return { ok: true, status: 200 }; } });
+  alerts.updatePolicy({ ...DEFAULT_POLICY, enabled: true, minimumSeverity: 'warning', countThreshold: 1,
+    categories: [...DEFAULT_POLICY.categories, 'service_enumeration'] });
+  assert.equal(alerts.enqueue(event({ type: 'waf_finding', severity: 'warning', category: 'service_enumeration',
+    outcome: 'edge_rejected', http: { method: 'GET', path: '/RDWeb', status: 444,
+      statusSource: 'edge_policy', auditStatus: 200 }, edge: {
+      target: '75.178.84.162', disposition: 'edge_rejected', mode: 'DetectionOnly',
+      statusVerified: true, originReached: false, correlationStatus: 'verified',
+      ruleIds: ['920350'], ruleSummary: 'Numeric IP used as the HTTP Host header',
+      behaviorSummary: 'Microsoft Remote Desktop Web service enumeration',
+    } })), true);
+  await alerts.draining;
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].text, /Request: GET \/RDWeb → Edge HTTP 444/);
+  assert.match(requests[0].text, /Audit phase: HTTP 200 \(not the final client response\)/);
+  assert.match(requests[0].text, /Matched security rules: 920350 · Numeric IP used as the HTTP Host header/);
+  assert.match(requests[0].text, /Behavior: Microsoft Remote Desktop Web service enumeration/);
+  assert.match(requests[0].text, /WAF action: Rejected by edge host policy before proxying to the application/);
+  assert.match(requests[0].text, /application was not reached/);
+  assert.doesNotMatch(requests[0].text, /Origin returned/);
+  assert.doesNotMatch(requests[0].text, /Outcome: observed_passed|Results: observed passed/);
+}));
+
+test('successful WAF observations state the concrete origin result without generic exploitation caveats', async () => temporary(async (directory) => {
+  const requests = [];
+  const alerts = new TelegramAlerts(directory, { ...credentials(directory), retryDelays: [0],
+    fetch: async (_url, options) => { requests.push(JSON.parse(options.body)); return { ok: true, status: 200 }; } });
+  alerts.updatePolicy({ ...DEFAULT_POLICY, enabled: true, minimumSeverity: 'info', countThreshold: 1,
+    categories: [...DEFAULT_POLICY.categories, 'protocol_anomaly'] });
+  assert.equal(alerts.enqueue(event({ type: 'waf_finding', severity: 'info', category: 'protocol_anomaly',
+    outcome: 'observed_passed', http: { method: 'GET', path: '/', status: 200,
+      statusSource: 'edge_access', auditStatus: 200 }, edge: {
+      target: 'access.example.invalid', disposition: 'observed_passed', statusVerified: true,
+      originReached: true, ruleIds: ['920320'], ruleSummary: 'Request missing User-Agent header',
+    } })), true);
+  await alerts.draining;
+  assert.match(requests[0].text, /WAF action: Origin returned a final 2xx\/3xx response/);
+  assert.match(requests[0].text, /Matched security rules: 920320 · Request missing User-Agent header/);
+  assert.doesNotMatch(requests[0].text, /prove access or exploitation/);
+}));
+
+test('historical WAF imports populate monitoring without generating Telegram alerts', async () => temporary(async (directory) => {
+  const requests = [];
+  const alerts = new TelegramAlerts(directory, { ...credentials(directory), retryDelays: [0],
+    fetch: async (_url, options) => { requests.push(JSON.parse(options.body)); return { ok: true, status: 200 }; } });
+  alerts.updatePolicy({ ...DEFAULT_POLICY, enabled: true, countThreshold: 1 });
+  const imported = event({ category: 'sensitive_file_enumeration', edge: {
+    target: 'access.example.invalid', disposition: 'origin_rejected', historical: true } });
+  assert.equal(alerts.enqueue(imported), false);
+  assert.equal(requests.length, 0);
+  assert.equal(alerts.state().incidents.active, 0);
+}));
+
+test('the initial event threshold must be met inside the aggregation window', async () => temporary(async (directory) => {
+  let now = new Date('2026-09-23T03:00:00.000Z');
+  const requests = [];
+  const alerts = new TelegramAlerts(directory, { ...credentials(directory), retryDelays: [0], now: () => now,
+    fetch: async (_url, options) => { requests.push(JSON.parse(options.body)); return { ok: true, status: 200 }; } });
+  alerts.updatePolicy({ ...DEFAULT_POLICY, enabled: true, countThreshold: 2, aggregationWindowSeconds: 60 });
+  assert.equal(alerts.enqueue(event()), false);
+  now = new Date('2026-09-23T03:02:00.000Z');
+  assert.equal(alerts.enqueue(event()), false);
+  now = new Date('2026-09-23T03:02:30.000Z');
+  assert.equal(alerts.enqueue(event()), true);
+  await alerts.draining;
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].text, /total: 3/);
 }));
 
 test('delivery failure never escapes the ledger path and preserves a bounded pending alert', async () => temporary(async (directory) => {
@@ -102,6 +212,8 @@ test('quiet hours and global ceilings suppress noise while allowing critical ove
   await alerts.draining;
   assert.equal(requests.length, 1);
   assert.equal(alerts.enqueue(event({ source: { ip: '198.51.100.8', scope: 'public', country: 'US' } })), false);
+  assert.equal(alerts.enqueue(event({ source: { ip: '198.51.100.8', scope: 'public', country: 'US' } })), false);
+  assert.equal(alerts.state().incidents.suppressedByHourlyLimit, 1);
 }));
 
 test('missing credentials expose configuration state but disable delivery', async () => temporary(async (directory) => {

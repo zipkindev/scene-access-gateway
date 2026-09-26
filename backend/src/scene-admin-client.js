@@ -1,6 +1,6 @@
 'use strict';
 
-const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','browserTitle','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','securityPanel','securitySummary','securitySeverity','securityRefresh','securityStatus','securityEvents','telegramToken','telegramVerifyBot','telegramBotLink','telegramBotStatus','telegramChat','telegramChatId','telegramDiscoverChats','telegramConnectChat','telegramDisconnect','telegramConfigured','telegramEnabled','telegramSeverity','telegramRedaction','telegramThreshold','telegramWindow','telegramCooldown','telegramHourlyLimit','telegramQuietEnabled','telegramQuietStart','telegramQuietEnd','telegramCriticalOverride','telegramSave','telegramTest','telegramStatus','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
+const elements = Object.fromEntries(['revision','workspace','frame','scenePlane','background','motionPreview','motionPanel','motionEnabled','motionOptions','motionNote','motionStatus','gamePanel','gameEnabled','gamePreview','gamePreviewMenu','gamePreviewTitle','gamePreviewDetail','gameTest','gameReset','gameStatus','hotspot','qrPreview','zoomOut','zoomIn','zoomReset','zoomLevel','backgroundSelect','backgroundSize','browserTitle','clickDebugger','framingPanel','framingProfile','drawFocus','clearFocus','focusRect','focusStatus','focusPreview','focusPreviewImage','hotspotSelect','addSelectedHotspot','removeHotspot','destinationSelect','unlockMode','sequenceControls','sequencePointSelect','addSequencePoint','removeSequencePoint','maxGapSeconds','totalSeconds','coordinateLabel','x','y','radius','maximumZoom','preview','save','publish','status','history','imageLabel','imageFile','selectedUploadSize','uploadImage','optimizeQuality','optimizeImage','images','destinationType','destinationName','destinationUpstream','prepareDestination','destinationPlan','addDestination','pendingDestinations','managedDestination','destinationSnapshot','firewallUsername','firewallEmail','registerFirewallUser','firewallRegistrationStatus','firewallRegistrations','securityPanel','securitySummary','securitySeverity','securityRefresh','securityStatus','securityEvents','securityMap','securityMapSvg','securityMapRoutes','securityMapNodes','securityMapSummary','securityMapSelection','securityMapDestination','telegramToken','telegramVerifyBot','telegramBotLink','telegramBotStatus','telegramChat','telegramChatId','telegramDiscoverChats','telegramConnectChat','telegramDisconnect','telegramConfigured','telegramEnabled','telegramSeverity','telegramRedaction','telegramThreshold','telegramWindow','telegramCooldown','telegramReminder','telegramQuietAfter','telegramHourlyLimit','telegramQuietEnabled','telegramQuietStart','telegramQuietEnd','telegramCriticalOverride','telegramSave','telegramTest','telegramStatus','sourceReconDialog','sourceReconTarget','sourceReconCancel','sourceReconConfirm','sessionExpired','sessionSignIn','sessionSignInStatus'].map((id) => [id, document.getElementById(id)]));
 let state;
 let scene;
 let selectedIndex = 0;
@@ -280,6 +280,8 @@ function render() {
   elements.backgroundSelect.value = scene.backgroundId;
   scene.display ||= { title: 'ZArcade' };
   elements.browserTitle.value = scene.display.title;
+  scene.diagnostics ||= { clickDebugger: false };
+  elements.clickDebugger.checked = scene.diagnostics.clickDebugger === true;
   elements.backgroundSize.value = 'Selected image: ' + formatBytes(background.bytes) + ' · ' + (background.mediaType === 'image/webp' ? 'WebP' : 'PNG');
   renderGameControls();
   elements.optimizeImage.disabled = background.mediaType !== 'image/png';
@@ -538,6 +540,9 @@ elements.frame.addEventListener('pointercancel', endPan);
 new ResizeObserver(fitFrame).observe(elements.workspace);
 new ResizeObserver(renderFocusGuide).observe(elements.focusPreview);
 elements.browserTitle.addEventListener('input', () => { scene.display = { title: elements.browserTitle.value }; });
+elements.clickDebugger.addEventListener('change', () => {
+  scene.diagnostics = { clickDebugger: elements.clickDebugger.checked };
+});
 elements.backgroundSelect.addEventListener('change', () => {
   stopGamePreview();
   const replacement = state.backgrounds.find((item) => item.id === elements.backgroundSelect.value);
@@ -899,10 +904,14 @@ function securityMetric(value, label) {
 }
 
 const countryNames = typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(['en'], { type: 'region' }) : null;
-const securityFilters = Object.fromEntries(['severity', 'type', 'category', 'country', 'source']
+const securityFilters = Object.fromEntries(['stream', 'severity', 'type', 'category', 'country', 'city', 'source', 'method', 'status', 'disposition']
   .map((kind) => [kind, new Map()]));
+let securityMapData = null;
+let selectedMapSource = null;
+let selectedMapCity = null;
 const securityLabels = {
-  severity: 'Severity', type: 'Event', category: 'Alert', country: 'Country', source: 'Source',
+  stream: 'Stream', severity: 'Severity', type: 'Event', category: 'Alert', country: 'Country', city: 'City', source: 'Source',
+  method: 'Method', status: 'HTTP status', disposition: 'Disposition',
 };
 
 function countryName(code) {
@@ -911,6 +920,42 @@ function countryName(code) {
 
 function readableSecurityValue(value) {
   return String(value).replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function wafDispositionLabel(disposition, mode = null, statusVerified = false) {
+  const labels = {
+    observed_passed: statusVerified
+      ? 'Origin returned final 2xx/3xx'
+      : mode === 'DetectionOnly' ? 'Observed only (DetectionOnly; audit reported 2xx/3xx)'
+        : 'Observed only (WAF audit reported 2xx/3xx)',
+    origin_rejected: statusVerified ? 'Origin returned final 4xx' : 'WAF audit reported 4xx; final edge status unverified',
+    origin_rate_limited: statusVerified ? 'Origin returned final HTTP 429' : 'WAF audit reported 429; final edge status unverified',
+    origin_error: statusVerified ? 'Origin returned final 5xx' : 'WAF audit reported 5xx; final edge status unverified',
+    waf_blocked: 'Blocked by WAF before the origin',
+    edge_rejected: 'Rejected by edge host policy before the application',
+    outcome_unknown: 'Final edge and application outcome unverified',
+  };
+  return labels[disposition] || readableSecurityValue(disposition);
+}
+
+function wafOutcomeMeaning(event) {
+  if (event.edge?.statusVerified !== true) {
+    if (event.edge?.correlationStatus === 'pending') return 'Automatic edge correlation is pending';
+    return event.http?.status !== null
+      ? `ModSecurity audit reported HTTP ${event.http.status}; exact final-response evidence is unavailable`
+      : 'Exact final-response evidence is unavailable';
+  }
+  if (event.edge?.disposition === 'observed_passed') {
+    return null;
+  }
+  if (event.edge?.disposition === 'origin_rejected') return 'The origin rejected the request';
+  if (event.edge?.disposition === 'origin_rate_limited') return 'The origin rate-limited the request';
+  if (event.edge?.disposition === 'origin_error') return 'The origin returned a server error';
+  if (event.edge?.disposition === 'waf_blocked') return 'The request did not reach the origin';
+  if (event.edge?.disposition === 'edge_rejected') {
+    return 'The edge returned HTTP 444 without proxying; the application was not reached';
+  }
+  return null;
 }
 
 const adminActionLabels = {
@@ -936,6 +981,18 @@ const securityToolbar = elements.securitySeverity.closest('.security-toolbar');
 const severityField = elements.securitySeverity.closest('.field');
 const securityQuickFilters = document.createElement('div');
 securityQuickFilters.className = 'security-quick-filters';
+securityQuickFilters.append(Object.assign(document.createElement('span'), { textContent: 'Stream:' }));
+const streamButtons = new Map();
+for (const [value, label] of [['application', 'Application'], ['waf', 'WAF']]) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'security-filter-option';
+  button.textContent = label;
+  button.setAttribute('aria-pressed', 'false');
+  button.addEventListener('click', () => toggleSecurityFilter('stream', value, label));
+  streamButtons.set(value, button);
+  securityQuickFilters.append(button);
+}
 securityQuickFilters.append(Object.assign(document.createElement('span'), { textContent: 'Severity:' }));
 const severityButtons = new Map();
 for (const value of ['critical', 'warning', 'info']) {
@@ -950,6 +1007,19 @@ for (const value of ['critical', 'warning', 'info']) {
 }
 securityToolbar.before(securityQuickFilters);
 severityField.remove();
+
+const securityWindowField = document.createElement('label');
+securityWindowField.className = 'field';
+securityWindowField.append('Time range');
+elements.securityWindow = document.createElement('select');
+elements.securityWindow.id = 'securityWindow';
+for (const [value, label] of [['24', 'Last 24 hours'], ['72', 'Last 3 days'], ['168', 'Last 7 days'],
+  ['720', 'Last 30 days'], ['all', 'All retained events']]) {
+  elements.securityWindow.append(new Option(label, value));
+}
+securityWindowField.append(elements.securityWindow);
+securityToolbar.insertBefore(securityWindowField, elements.securityRefresh);
+elements.securityWindow.addEventListener('change', loadSecurity);
 
 function addFilterSelect(labelText, id) {
   const label = document.createElement('label');
@@ -985,11 +1055,281 @@ const securityClear = document.createElement('button');
 securityClear.type = 'button';
 securityClear.textContent = 'Clear filters';
 securityToolbar.insertBefore(securityClear, elements.securityRefresh);
+const securityExport = document.createElement('button');
+securityExport.type = 'button';
+securityExport.textContent = 'Export filtered CSV';
+securityToolbar.insertBefore(securityExport, elements.securityRefresh);
 const securityFilterChips = document.createElement('div');
 securityFilterChips.className = 'security-filter-chips';
 securityToolbar.after(securityFilterChips);
 
+const sourceIntelligencePanel = document.createElement('section');
+sourceIntelligencePanel.className = 'source-intelligence';
+sourceIntelligencePanel.hidden = true;
+const sourceIntelligenceHead = document.createElement('div');
+sourceIntelligenceHead.className = 'source-intelligence-head';
+const sourceIntelligenceHeading = document.createElement('div');
+const sourceIntelligenceTitle = document.createElement('h3');
+sourceIntelligenceTitle.textContent = 'Source intelligence';
+const sourceIntelligenceTarget = document.createElement('p');
+sourceIntelligenceTarget.textContent = 'Select one exact public source IP.';
+sourceIntelligenceHeading.append(sourceIntelligenceTitle, sourceIntelligenceTarget);
+const sourceIntelligenceStatus = document.createElement('span');
+sourceIntelligenceStatus.className = 'source-intelligence-status';
+sourceIntelligenceStatus.setAttribute('role', 'status');
+sourceIntelligenceHead.append(sourceIntelligenceHeading, sourceIntelligenceStatus);
+const sourceIntelligenceActions = document.createElement('div');
+sourceIntelligenceActions.className = 'source-intelligence-actions';
+const sourceInvestigate = document.createElement('button');
+sourceInvestigate.type = 'button'; sourceInvestigate.className = 'primary'; sourceInvestigate.textContent = 'Investigate source';
+const sourceRecon = document.createElement('button');
+sourceRecon.type = 'button'; sourceRecon.textContent = 'Run ethical reconnaissance'; sourceRecon.disabled = true;
+sourceRecon.title = 'Run a passive investigation first.';
+const sourceExport = document.createElement('button');
+sourceExport.type = 'button'; sourceExport.textContent = 'Export sanitized JSON'; sourceExport.disabled = true;
+sourceIntelligenceActions.append(sourceInvestigate, sourceRecon, sourceExport);
+const sourceIntelligenceWarning = document.createElement('div');
+sourceIntelligenceWarning.className = 'source-intelligence-warning';
+sourceIntelligenceWarning.textContent = 'Network registration and routing identify infrastructure—not the responsible person. '
+  + 'Request headers are attacker-controlled evidence. Active reconnaissance contacts the remote host and requires explicit confirmation.';
+const sourceIntelligenceResults = document.createElement('div');
+sourceIntelligenceResults.className = 'source-intelligence-grid';
+sourceIntelligenceResults.innerHTML = '<p class="source-intelligence-empty">Run a passive investigation to collect ownership, routing, DNS, geolocation, and observed-event evidence.</p>';
+sourceIntelligencePanel.append(sourceIntelligenceHead, sourceIntelligenceActions, sourceIntelligenceWarning, sourceIntelligenceResults);
+elements.securityStatus.after(sourceIntelligencePanel);
+let sourceIntelligenceData = null;
+let sourceIntelligenceIp = null;
+
+function exactInvestigationIp() {
+  if (selectedMapSource) return selectedMapSource;
+  if (securityFilters.source.size !== 1) return null;
+  const value = [...securityFilters.source.keys()][0];
+  return value.includes('/') ? null : value;
+}
+
+function intelValue(value) {
+  if (value === null || value === undefined || value === '') return 'Unavailable';
+  if (Array.isArray(value)) return value.length ? value.map(intelValue).join(' · ') : 'None observed';
+  if (typeof value === 'object') return Object.entries(value)
+    .map(([key, item]) => intelLabel(key) + ': ' + intelValue(item)).join(' · ');
+  return String(value);
+}
+
+function intelLabel(value) {
+  const text = String(value ?? '');
+  if (/^[A-Z0-9]+$/.test(text)) return text;
+  return text.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function renderIntelValue(detail, value, filterKind = null) {
+  if (Array.isArray(value) && value.length && value.every((item) => item && Number.isInteger(item.port)
+    && (item.observation === null || typeof item.observation === 'object'))) {
+    detail.classList.add('source-intelligence-endpoints');
+    for (const endpoint of value) {
+      const card = document.createElement('article');
+      card.className = 'source-intelligence-endpoint';
+      const heading = document.createElement('strong');
+      const protocol = endpoint.observation?.protocol ? ' · ' + String(endpoint.observation.protocol).toUpperCase() : '';
+      heading.textContent = 'TCP ' + endpoint.port + protocol;
+      const observation = document.createElement('span');
+      observation.textContent = endpoint.observation
+        ? Object.entries(endpoint.observation).filter(([key]) => key !== 'protocol')
+          .map(([key, item]) => intelLabel(key) + ': ' + intelValue(item)).join(' · ') || 'Service responded without additional metadata.'
+        : 'No protocol metadata returned.';
+      card.append(heading, observation);
+      detail.append(card);
+    }
+    return;
+  }
+  if (Array.isArray(value) && value.length && value.every((item) => item && typeof item === 'object'
+    && Object.keys(item).every((key) => ['value', 'count'].includes(key)) && Number.isFinite(item.count))) {
+    detail.classList.add('source-intelligence-values');
+    for (const item of value) {
+      const badge = document.createElement(filterKind ? 'button' : 'span');
+      badge.className = 'source-intelligence-value';
+      badge.textContent = intelLabel(item.value) + ' · ' + item.count.toLocaleString();
+      if (filterKind) {
+        const filterValue = String(item.value);
+        badge.type = 'button';
+        badge.dataset.securityFilterKind = filterKind;
+        badge.dataset.securityFilterValue = filterValue;
+        badge.title = 'Filter events by ' + securityLabels[filterKind].toLowerCase() + ': ' + intelLabel(filterValue);
+        badge.setAttribute('aria-pressed', String(securityFilters[filterKind].has(filterValue)));
+        badge.addEventListener('click', () => toggleSecurityFilter(filterKind, filterValue, intelLabel(filterValue)));
+      }
+      detail.append(badge);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    if (!value.length) { detail.textContent = 'None observed'; return; }
+    detail.classList.add('source-intelligence-values');
+    for (const item of value) {
+      const badge = document.createElement('span');
+      badge.className = 'source-intelligence-value';
+      badge.textContent = intelValue(item);
+      detail.append(badge);
+    }
+    return;
+  }
+  detail.textContent = intelValue(value);
+}
+
+function confirmSourceRecon(ip) {
+  elements.sourceReconTarget.textContent = ip;
+  elements.sourceReconDialog.returnValue = 'cancel';
+  elements.sourceReconDialog.showModal();
+  elements.sourceReconCancel.focus();
+  return new Promise((resolve) => elements.sourceReconDialog.addEventListener('close', () => {
+    resolve(elements.sourceReconDialog.returnValue === 'confirm');
+  }, { once: true }));
+}
+
+function intelligenceCard(title, entries, wide = false) {
+  const card = document.createElement('section');
+  card.className = 'source-intelligence-card' + (wide ? ' wide' : '');
+  const heading = document.createElement('h4');
+  heading.textContent = title;
+  const list = document.createElement('dl');
+  for (const [label, value, options = {}] of entries) {
+    const term = document.createElement('dt'); term.textContent = label;
+    const detail = document.createElement('dd'); renderIntelValue(detail, value, options.filterKind || null);
+    list.append(term, detail);
+  }
+  card.append(heading, list);
+  return card;
+}
+
+function renderSourceIntelligence(result) {
+  sourceIntelligenceData = result;
+  const item = result?.investigation;
+  sourceRecon.disabled = !item || !result.activeEnabled;
+  sourceRecon.title = !item ? 'Run a passive investigation first.' : result.activeEnabled
+    ? 'Contacts this exact public IP with the displayed bounded TCP profile after confirmation.'
+    : 'Disabled by server policy.';
+  sourceExport.disabled = !item;
+  if (!item) {
+    sourceIntelligenceResults.innerHTML = '<p class="source-intelligence-empty">No saved investigation for this source. Run a passive investigation first.</p>';
+    sourceIntelligenceStatus.textContent = result?.activeEnabled ? 'Active recon available after passive review' : 'Active recon disabled by server policy';
+    return;
+  }
+  const passive = item.passive || {};
+  const rdap = passive.rdap || {};
+  const events = passive.events || {};
+  const classification = item.classification || {};
+  const primaryEntity = rdap.entities?.find((entity) => entity.roles?.includes('registrant')) || rdap.entities?.[0] || {};
+  const classificationCard = intelligenceCard('Assessment', [
+    ['Likely source type', classification.label], ['Confidence', (classification.confidence || 0) + '%'],
+    ['Why', classification.explanation], ['Important', item.safety?.attributionWarning],
+  ], true);
+  classificationCard.querySelector('dd').className = 'source-intelligence-classification';
+  classificationCard.querySelectorAll('dd')[1].className = 'source-intelligence-confidence';
+  const ownership = intelligenceCard('Ownership & allocation', [
+    ['Network', rdap.name], ['Handle', rdap.handle], ['Range', rdap.startAddress && rdap.endAddress ? rdap.startAddress + ' – ' + rdap.endAddress : null],
+    ['Registered entity', primaryEntity.name || primaryEntity.handle], ['Country', rdap.country],
+    ['Abuse contacts', (rdap.entities || []).filter((entity) => entity.roles?.includes('abuse')).flatMap((entity) => entity.email || [])],
+    ['Evidence source', rdap.source],
+  ]);
+  const routing = intelligenceCard('Routing & location', [
+    ['Origin ASN', passive.routing?.asns?.map((asn) => 'AS' + asn)], ['Announced prefix', passive.routing?.prefix],
+    ['Route holder', passive.routing?.holder], ['Route announced', passive.routing?.announced],
+    ['GeoLite city', [passive.geo?.city, passive.geo?.region, passive.geo?.country].filter(Boolean).join(', ')],
+    ['GeoLite network', [passive.geo?.asn ? 'AS' + passive.geo.asn : null, passive.geo?.organization].filter(Boolean).join(' ')],
+  ]);
+  const dnsCard = intelligenceCard('DNS identity', [
+    ['PTR names', passive.ptr?.names], ['Forward-confirmed PTR', passive.ptr?.forwardConfirmed],
+    ['Interpretation', passive.ptr?.forwardConfirmed?.length ? 'Reverse name resolves back to this IP.' : 'No forward-confirmed reverse identity.'],
+  ]);
+  const evidence = intelligenceCard('Observed request evidence', [
+    ['Events retained', events.total], ['First seen', events.firstSeenAt ? new Date(events.firstSeenAt).toLocaleString() : null],
+    ['Last seen', events.lastSeenAt ? new Date(events.lastSeenAt).toLocaleString() : null],
+    ['Categories', events.categories, { filterKind: 'category' }], ['Severities', events.severity, { filterKind: 'severity' }],
+    ['Methods', events.methods, { filterKind: 'method' }], ['Statuses', events.statuses, { filterKind: 'status' }],
+    ['Dispositions', events.dispositions, { filterKind: 'disposition' }], ['Distinct agent fingerprints', events.userAgentFingerprints],
+    ['Evidence warning', events.note],
+  ], true);
+  const provider = intelligenceCard('Evidence quality', [
+    ['Provider errors', passive.providerErrors], ['Collected', passive.completedAt ? new Date(passive.completedAt).toLocaleString() : null],
+    ['Investigation ID', item.investigationId], ['Classification indicators', classification.indicators],
+  ]);
+  const active = item.active;
+  const activeCard = intelligenceCard('Ethical reconnaissance', active ? [
+    ['Status', active.status], ['Profile', active.profile], ['Completed', new Date(active.completedAt).toLocaleString()],
+    ['Error', active.error],
+    ['Open ports', active.ports.filter((port) => port.open).map((port) => port.port)],
+    ['Endpoint observations', active.ports.filter((port) => port.open).map((port) => ({ port: port.port, observation: port.observation }))],
+    ['Guardrails', item.safety?.activePolicy],
+  ] : [['Status', result.activeEnabled ? 'Not run. Review passive evidence, then explicitly confirm.' : 'Disabled by server policy.'],
+    ['Fixed ports', result.activeProfile?.ports], ['Permitted probes', result.activeProfile?.probes], ['Prohibited', result.activeProfile?.prohibited]], true);
+  sourceIntelligenceResults.replaceChildren(classificationCard, ownership, routing, dnsCard, provider, evidence, activeCard);
+  sourceIntelligenceStatus.textContent = 'Updated ' + new Date(item.completedAt).toLocaleString()
+    + (result.activeEnabled ? '' : ' · active recon disabled by policy');
+}
+
+async function loadSourceIntelligence(ip) {
+  sourceIntelligenceStatus.textContent = 'Loading saved evidence…';
+  const response = await fetch('/api/security/source-intelligence?ip=' + encodeURIComponent(ip), { cache: 'no-store' });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'Source intelligence is unavailable');
+  if (sourceIntelligenceIp === ip) renderSourceIntelligence(result);
+}
+
+function updateSourceIntelligenceTarget() {
+  const ip = exactInvestigationIp();
+  sourceIntelligencePanel.hidden = !ip;
+  if (!ip || ip === sourceIntelligenceIp) return;
+  sourceIntelligenceIp = ip;
+  sourceIntelligenceData = null;
+  sourceIntelligenceTarget.textContent = 'Exact source ' + ip;
+  sourceInvestigate.disabled = false; sourceRecon.disabled = true; sourceExport.disabled = true;
+  sourceRecon.title = 'Run a passive investigation first.';
+  sourceIntelligenceResults.innerHTML = '<p class="source-intelligence-empty">Checking for saved evidence…</p>';
+  loadSourceIntelligence(ip).catch((error) => { if (sourceIntelligenceIp === ip) sourceIntelligenceStatus.textContent = error.message; });
+}
+
+async function requestSourceInvestigation(active) {
+  const ip = exactInvestigationIp();
+  if (!ip) return;
+  let acknowledgement = '';
+  if (active) {
+    const accepted = await confirmSourceRecon(ip);
+    if (!accepted) return;
+    acknowledgement = 'I understand this contacts the remote host';
+  }
+  sourceInvestigate.disabled = true; sourceRecon.disabled = true;
+  sourceIntelligenceStatus.textContent = active ? 'Running bounded ethical reconnaissance…' : 'Collecting passive ownership and routing evidence…';
+  try {
+    const response = await fetch('/api/security/source-intelligence', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Scene-CSRF': requireCsrf() },
+      body: JSON.stringify({ ip, active, acknowledgement }) });
+    const result = await readWriteResponse(response);
+    if (!response.ok) throw new Error(result.error || 'Source investigation failed');
+    if (sourceIntelligenceIp === ip) renderSourceIntelligence(result);
+  } catch (error) { sourceIntelligenceStatus.textContent = error.message; }
+  finally {
+    sourceInvestigate.disabled = false;
+    sourceRecon.disabled = !sourceIntelligenceData?.investigation || !sourceIntelligenceData?.activeEnabled;
+  }
+}
+
+sourceInvestigate.addEventListener('click', () => requestSourceInvestigation(false));
+sourceRecon.addEventListener('click', () => requestSourceInvestigation(true));
+sourceExport.addEventListener('click', () => {
+  if (!sourceIntelligenceData?.investigation) return;
+  const blob = new Blob([JSON.stringify(sourceIntelligenceData.investigation, null, 2) + '\n'], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'source-intelligence-' + sourceIntelligenceIp.replaceAll(':', '-') + '.json';
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 0);
+});
+
 function renderSecurityFilters() {
+  if (selectedMapSource && !securityFilters.source.has(selectedMapSource)) selectedMapSource = null;
+  if (selectedMapCity && !securityFilters.city.has(selectedMapCity)) selectedMapCity = null;
+  for (const [value, button] of streamButtons) {
+    button.setAttribute('aria-pressed', String(securityFilters.stream.has(value)));
+  }
   for (const [value, button] of severityButtons) {
     button.setAttribute('aria-pressed', String(securityFilters.severity.has(value)));
   }
@@ -1016,7 +1356,12 @@ function renderSecurityFilters() {
     chips.push(empty);
   }
   securityFilterChips.replaceChildren(...chips);
+  for (const button of sourceIntelligencePanel.querySelectorAll('[data-security-filter-kind]')) {
+    button.setAttribute('aria-pressed', String(securityFilters[button.dataset.securityFilterKind]
+      ?.has(button.dataset.securityFilterValue)));
+  }
   securityClear.disabled = !Object.values(securityFilters).some((values) => values.size);
+  updateSourceIntelligenceTarget();
 }
 
 function addSecurityFilter(kind, value, label = readableSecurityValue(value)) {
@@ -1057,10 +1402,174 @@ securitySourceAdd.addEventListener('click', addSourceFilter);
 securitySourceInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') addSourceFilter(); });
 securityClear.addEventListener('click', () => {
   for (const values of Object.values(securityFilters)) values.clear();
+  selectedMapSource = null;
+  selectedMapCity = null;
   renderSecurityFilters();
+  renderSecurityMap(securityMapData);
   loadSecurity();
 });
 renderSecurityFilters();
+
+function mapLabel(location) {
+  const place = [location.city, location.region, location.country].filter(Boolean).join(', ');
+  return place || 'Approximate location unavailable';
+}
+
+function clearMapSelection() {
+  if (!selectedMapSource && !selectedMapCity && !securityFilters.source.size && !securityFilters.city.size) return;
+  securityFilters.source.clear();
+  securityFilters.city.clear();
+  selectedMapSource = null;
+  selectedMapCity = null;
+  renderSecurityFilters();
+  renderSecurityMap(securityMapData);
+  loadSecurity();
+}
+
+function toggleMapSource(source) {
+  if (selectedMapSource === source.ip) return clearMapSelection();
+  securityFilters.source.clear();
+  securityFilters.city.clear();
+  securityFilters.source.set(source.ip, source.ip);
+  selectedMapSource = source.ip;
+  selectedMapCity = null;
+  renderSecurityFilters();
+  renderSecurityMap(securityMapData);
+  loadSecurity();
+}
+
+function toggleMapCity(city) {
+  if (selectedMapCity === city) return clearMapSelection();
+  securityFilters.source.clear();
+  securityFilters.city.clear();
+  securityFilters.city.set(city, city);
+  selectedMapSource = null;
+  selectedMapCity = city;
+  renderSecurityFilters();
+  renderSecurityMap(securityMapData);
+  const location = securityMapData?.sources?.find((source) => source.city === city);
+  if (location) securityGlobe.focusLocation(location, 2.15);
+  loadSecurity();
+}
+
+function mapNode(tag, className, text = '') {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  node.textContent = text;
+  return node;
+}
+
+const mapHeader = mapNode('div', 'security-map-header');
+const mapTitle = mapNode('div', 'security-map-title');
+mapTitle.append(mapNode('strong', '', 'Threat connection globe'));
+elements.securityMapSummary = mapNode('span', '', 'Waiting for security events…');
+mapTitle.append(elements.securityMapSummary);
+mapHeader.append(mapTitle, mapNode('div', 'security-map-legend', 'Left-drag location · right-drag flight pitch/bank · wheel zoom\nSelect a source to fly destination → attacker, then reveal its location'));
+elements.securityGlobe = mapNode('canvas');
+elements.securityGlobe.id = 'securityGlobe';
+elements.securityGlobe.tabIndex = 0;
+elements.securityGlobe.setAttribute('aria-label', 'Interactive three-dimensional globe of security request origins');
+const mapStats = mapNode('aside', 'security-map-stats');
+elements.securityMapMetrics = mapNode('div', 'security-map-metrics');
+const cityGroup = mapNode('section', 'security-map-group');
+cityGroup.append(mapNode('strong', '', 'Top cities'));
+elements.securityMapCities = mapNode('div', 'security-map-list');
+cityGroup.append(elements.securityMapCities);
+const sourceGroup = mapNode('section', 'security-map-group');
+elements.securityMapSourcesTitle = mapNode('strong', '', 'Top source IPs');
+sourceGroup.append(elements.securityMapSourcesTitle);
+elements.securityMapSources = mapNode('div', 'security-map-list');
+sourceGroup.append(elements.securityMapSources);
+mapStats.append(elements.securityMapMetrics, cityGroup, sourceGroup);
+const mapControls = mapNode('div', 'security-map-controls');
+elements.securityGlobeZoomOut = mapNode('button', '', '−');
+elements.securityGlobeZoomOut.type = 'button'; elements.securityGlobeZoomOut.title = 'Zoom out';
+elements.securityGlobeZoomIn = mapNode('button', '', '+');
+elements.securityGlobeZoomIn.type = 'button'; elements.securityGlobeZoomIn.title = 'Zoom in';
+elements.securityGlobeReset = mapNode('button', '', 'Reset view');
+elements.securityGlobeReset.type = 'button';
+elements.securityGlobeTravel = mapNode('button', '', 'Auto travel: On');
+elements.securityGlobeTravel.type = 'button'; elements.securityGlobeTravel.setAttribute('aria-pressed', 'true');
+mapControls.append(elements.securityGlobeZoomOut, elements.securityGlobeZoomIn, elements.securityGlobeReset, elements.securityGlobeTravel);
+const mapFooter = mapNode('div', 'security-map-footer');
+elements.securityMapSelection = mapNode('span', '', 'Select a source to trace its route');
+elements.securityMapDestination = mapNode('span', '', 'Destination not configured');
+mapFooter.append(elements.securityMapSelection, elements.securityMapDestination);
+elements.securityMap.replaceChildren(elements.securityGlobe, mapHeader, mapStats, mapControls, mapFooter);
+
+const securityGlobe = window.SecurityGlobe.create(elements.securityGlobe, {
+  onSource: toggleMapSource,
+  onBackground: clearMapSelection,
+  onError: () => { elements.securityMapSummary.textContent = 'Globe renderer failed; refresh to retry'; },
+});
+securityGlobe.setActive(elements.securityPanel.open);
+elements.securityGlobeZoomOut.addEventListener('click', () => securityGlobe.zoomBy(1 / 1.2));
+elements.securityGlobeZoomIn.addEventListener('click', () => securityGlobe.zoomBy(1.2));
+elements.securityGlobeReset.addEventListener('click', () => securityGlobe.reset());
+elements.securityGlobeTravel.addEventListener('click', () => {
+  const enabled = elements.securityGlobeTravel.getAttribute('aria-pressed') !== 'true';
+  securityGlobe.setTravelEnabled(enabled);
+  elements.securityGlobeTravel.setAttribute('aria-pressed', String(enabled));
+  elements.securityGlobeTravel.textContent = 'Auto travel: ' + (enabled ? 'On' : 'Off');
+});
+
+function mapMetric(value, label) {
+  const item = mapNode('div', 'globe-metric');
+  item.append(mapNode('strong', '', String(value)), mapNode('span', '', label));
+  return item;
+}
+
+function renderSecurityMap(data) {
+  securityMapData = data;
+  if (!data) return;
+  const destination = data.destination;
+  const sources = Array.isArray(data.sources) ? data.sources : [];
+  elements.securityMapSummary.textContent = data.located + ' of ' + data.total + ' recent event'
+    + (data.total === 1 ? '' : 's') + ' located · ' + sources.length + ' source'
+    + (sources.length === 1 ? '' : 's');
+  elements.securityMapSelection.textContent = selectedMapSource
+    ? 'Tracing destination → ' + selectedMapSource + ' · select again or click space to clear'
+    : selectedMapCity ? 'Showing alerts from ' + selectedMapCity + ' · select again to clear'
+      : 'Select a source to trace from your destination to the attacker';
+  elements.securityMapDestination.textContent = destination
+    ? 'Destination ' + destination.ip + ' · ' + mapLabel(destination)
+      + (data.destinationConfigured ? '' : ' · detected WAF target')
+    : 'Set SAG_SECURITY_MAP_DESTINATION_IP and install GeoLite2 City to draw routes';
+  const cities = new Map();
+  for (const source of sources) if (source.city) cities.set(source.city, (cities.get(source.city) || 0) + source.count);
+  elements.securityMapMetrics.replaceChildren(
+    mapMetric(data.total, 'connections'), mapMetric(sources.length, 'different IPs'),
+    mapMetric(cities.size, 'cities'), mapMetric(data.located, 'mapped events'));
+  const cityButtons = [...cities].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([city, count]) => {
+    const button = mapNode('button', '', city + ' · ' + count);
+    button.type = 'button'; button.setAttribute('aria-pressed', String(city === selectedMapCity));
+    button.addEventListener('click', () => toggleMapCity(city));
+    return button;
+  });
+  elements.securityMapCities.replaceChildren(...cityButtons);
+  const selectedSource = sources.find((source) => source.ip === selectedMapSource);
+  let regionalSources = sources;
+  let sourceTitle = 'Top source IPs';
+  if (selectedMapCity) {
+    regionalSources = sources.filter((source) => source.city === selectedMapCity);
+    sourceTitle = 'IPs in ' + selectedMapCity;
+  } else if (selectedSource) {
+    const sameArea = (source) => selectedSource.city ? source.city === selectedSource.city
+      : selectedSource.region ? source.region === selectedSource.region && source.country === selectedSource.country
+        : source.country === selectedSource.country;
+    regionalSources = sources.filter(sameArea);
+    sourceTitle = 'IPs near ' + (selectedSource.city || selectedSource.region || selectedSource.country || 'selected source');
+  }
+  elements.securityMapSourcesTitle.textContent = sourceTitle;
+  const sourceButtons = [...regionalSources].sort((a, b) => b.count - a.count).slice(0, 10).map((source) => {
+    const button = mapNode('button', '', source.ip + ' · ' + source.count);
+    button.type = 'button'; button.setAttribute('aria-pressed', String(source.ip === selectedMapSource));
+    button.addEventListener('click', () => toggleMapSource(source));
+    return button;
+  });
+  elements.securityMapSources.replaceChildren(...sourceButtons);
+  securityGlobe.setData(data, { source: selectedMapSource, city: selectedMapCity });
+}
 
 function fillSecurityOptions(select, values, label, kind, emptyLabel = 'No matching options') {
   const available = values.filter((value) => !securityFilters[kind].has(value));
@@ -1078,10 +1587,18 @@ function appendSecuritySource(detail, source) {
     ip.className = 'security-inline-filter';
     ip.textContent = source.ip;
     ip.title = 'Filter by this IP';
-    ip.addEventListener('click', () => addSecurityFilter('source', source.ip, source.ip));
+    ip.addEventListener('click', () => toggleMapSource(source));
     detail.append(' · ', ip);
   } else addText(source.ip || 'unknown');
-  addText([source.city, source.region].filter(Boolean).join(', '));
+  if (source.city) {
+    const city = document.createElement('button');
+    city.type = 'button';
+    city.className = 'security-inline-filter';
+    city.textContent = [source.city, source.region].filter(Boolean).join(', ');
+    city.title = 'Filter by this city';
+    city.addEventListener('click', () => toggleMapCity(source.city));
+    detail.append(' · ', city);
+  } else addText(source.region);
   if (source.country) {
     const country = document.createElement('button');
     country.type = 'button';
@@ -1211,7 +1728,49 @@ maxMindDisconnect.addEventListener('click', async () => {
   finally { if (maxMindState) showMaxMind(maxMindState); else maxMindDisconnect.disabled = false; }
 });
 
+function telegramNumberField(labelText, id, minimum, maximum) {
+  const input = document.createElement('input');
+  input.id = id;
+  input.type = 'number';
+  input.min = String(minimum);
+  input.max = String(maximum);
+  input.step = '1';
+  const label = document.createElement('label');
+  label.className = 'field';
+  label.append(labelText, input);
+  return { label, input };
+}
+const telegramPolicyGrid = elements.telegramCooldown.closest('.telegram-grid');
+elements.telegramCooldown.closest('.field').firstChild.textContent = 'Initial dedupe window (seconds)';
+const reminderField = telegramNumberField('Persistent reminder (seconds)', 'telegramReminder', 60, 86400);
+const quietAfterField = telegramNumberField('Close incident after quiet (seconds)', 'telegramQuietAfter', 60, 604800);
+telegramPolicyGrid.insertBefore(reminderField.label, elements.telegramHourlyLimit.closest('.field'));
+telegramPolicyGrid.insertBefore(quietAfterField.label, elements.telegramHourlyLimit.closest('.field'));
+elements.telegramReminder = reminderField.input;
+elements.telegramQuietAfter = quietAfterField.input;
+
+const telegramCategoryGrid = document.querySelector('.telegram-categories');
+for (const [category, labelText] of [
+  ['cross_site_scripting_probe', 'Cross-site scripting probes'],
+  ['application_error_exposure', 'Application 500 responses'],
+  ['sensitive_file_enumeration', 'Sensitive-file enumeration'],
+  ['backup_file_probe', 'Backup-file probes'],
+  ['framework_admin_probe', 'Framework administration probes'],
+  ['known_scanner', 'Known scanner signatures'],
+  ['service_enumeration', 'Remote-service enumeration'],
+  ['protocol_anomaly', 'Protocol anomalies'],
+]) {
+  const label = document.createElement('label');
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.dataset.telegramCategory = category;
+  label.append(input, ' ' + labelText);
+  telegramCategoryGrid.append(label);
+}
 const telegramCategories = [...document.querySelectorAll('[data-telegram-category]')];
+const telegramIncidentList = document.createElement('div');
+telegramIncidentList.className = 'security-events';
+elements.telegramStatus.before(telegramIncidentList);
 
 function showTelegram(result) {
   const policy = result.policy;
@@ -1239,6 +1798,8 @@ function showTelegram(result) {
   elements.telegramThreshold.value = policy.countThreshold;
   elements.telegramWindow.value = policy.aggregationWindowSeconds;
   elements.telegramCooldown.value = policy.cooldownSeconds;
+  elements.telegramReminder.value = policy.persistentReminderSeconds;
+  elements.telegramQuietAfter.value = policy.incidentQuietSeconds;
   elements.telegramHourlyLimit.value = policy.globalLimitPerHour;
   elements.telegramQuietEnabled.checked = Boolean(policy.quietHours);
   elements.telegramQuietStart.value = policy.quietHours?.start || '22:00';
@@ -1248,8 +1809,29 @@ function showTelegram(result) {
   elements.telegramTest.disabled = !result.configured;
   const delivery = result.delivery;
   elements.telegramStatus.textContent = 'Pending: ' + result.pending
+    + ' · active incidents: ' + (result.incidents?.active || 0)
+    + (result.incidents?.suppressedByHourlyLimit ? ' · hourly-limit suppressions: ' + result.incidents.suppressedByHourlyLimit : '')
     + (delivery.lastSuccessAt ? ' · last delivered ' + new Date(delivery.lastSuccessAt).toLocaleString() : '')
     + (delivery.lastFailureAt ? ' · last failure ' + new Date(delivery.lastFailureAt).toLocaleString() + ' (' + delivery.lastFailureCode + ')' : '');
+  const incidents = (result.incidents?.items || []).map((incident) => {
+    const row = document.createElement('div');
+    row.className = 'security-event';
+    const heading = document.createElement('strong');
+    heading.textContent = readableSecurityValue(incident.category) + ' · ' + incident.count + ' observed';
+    const detail = document.createElement('div');
+    detail.textContent = incident.source + ' · target ' + incident.target + ' · last seen '
+      + new Date(incident.lastSeenAt).toLocaleString() + ' · '
+      + Object.entries(incident.dispositions).map(([name, count]) => wafDispositionLabel(name) + ' ' + count).join(' · ');
+    row.append(heading, detail);
+    return row;
+  });
+  if (!incidents.length) {
+    const empty = document.createElement('p');
+    empty.className = 'security-note';
+    empty.textContent = 'No active alert incidents.';
+    incidents.push(empty);
+  }
+  telegramIncidentList.replaceChildren(...incidents);
 }
 
 async function loadTelegram() {
@@ -1260,13 +1842,15 @@ async function loadTelegram() {
 
 function telegramPolicy() {
   return {
-    version: 1,
+    version: 2,
     enabled: elements.telegramEnabled.checked,
     minimumSeverity: elements.telegramSeverity.value,
     categories: telegramCategories.filter((input) => input.checked).map((input) => input.dataset.telegramCategory),
     countThreshold: Number(elements.telegramThreshold.value),
     aggregationWindowSeconds: Number(elements.telegramWindow.value),
     cooldownSeconds: Number(elements.telegramCooldown.value),
+    persistentReminderSeconds: Number(elements.telegramReminder.value),
+    incidentQuietSeconds: Number(elements.telegramQuietAfter.value),
     globalLimitPerHour: Number(elements.telegramHourlyLimit.value),
     quietHours: elements.telegramQuietEnabled.checked
       ? { start: elements.telegramQuietStart.value, end: elements.telegramQuietEnd.value } : null,
@@ -1375,21 +1959,123 @@ elements.telegramTest.addEventListener('click', async () => {
   finally { elements.telegramTest.disabled = false; }
 });
 
+elements.securityLoadOlder = document.createElement('button');
+elements.securityLoadOlder.type = 'button';
+elements.securityLoadOlder.textContent = 'Load older events';
+elements.securityLoadOlder.hidden = true;
+elements.securityEvents.after(elements.securityLoadOlder);
+let securityNextBefore = null;
+let securityNextBeforeId = null;
+let securityLoadedCount = 0;
+let securityActiveSince = null;
+
+function securityEventRow(event) {
+  const row = document.createElement('div');
+  row.className = 'security-event ' + (event.integrityValid === false ? 'critical' : event.severity);
+  const heading = document.createElement('strong');
+  heading.textContent = (event.type === 'admin_action' ? 'administrator activity' : event.type.replaceAll('_', ' ')) + ' · '
+    + (event.integrityValid === false ? 'integrity check failed' : event.severity);
+  const detail = document.createElement('div');
+  detail.append(new Date(event.at).toLocaleString());
+  if (event.type === 'admin_action') detail.append(' · Scene Management · ' + adminActionLabel(event.reason));
+  else {
+    appendSecuritySource(detail, event.source);
+    if (event.outcome && event.type !== 'waf_finding') detail.append(' · ' + event.outcome);
+  }
+  if (event.category) detail.append(' · ' + readableSecurityValue(event.category));
+  if (event.http?.path) detail.append(' · ' + event.http.method + ' ' + event.http.path
+    + (event.http.status !== null ? (event.type === 'waf_finding' && event.http.statusSource === 'edge_policy'
+      ? ' → Edge HTTP ' + event.http.status
+      : event.type === 'waf_finding' && event.http.statusSource === 'edge_access'
+        ? ' → Final HTTP ' + event.http.status
+      : event.type === 'waf_finding' && event.edge?.statusVerified !== true
+        ? ' → WAF audit HTTP ' + event.http.status : ' → HTTP ' + event.http.status) : '')
+    + (Number.isInteger(event.http.auditStatus)
+      ? ' · audit phase HTTP ' + event.http.auditStatus + ' (not final)' : ''));
+  if (event.edge) detail.append(' · target ' + (event.edge.target || 'unknown')
+    + ' · ' + wafDispositionLabel(event.edge.disposition, event.edge.mode, event.edge.statusVerified)
+    + (event.edge.ruleIds?.length ? ' · matched security rules ' + event.edge.ruleIds.join(', ') : '')
+    + (event.edge.ruleSummary ? ' · ' + event.edge.ruleSummary : '')
+    + (event.edge.behaviorSummary ? ' · behavior: ' + event.edge.behaviorSummary : '')
+    + (event.edge.originReached === false ? ' · origin not reached'
+      : event.edge.originReached === true ? ' · origin reached' : ' · origin reach unverified')
+    + (event.edge.anomalyScore !== null ? ' · score ' + event.edge.anomalyScore : '')
+    + (event.edge.historical ? ' · historical import' : ''));
+  if (event.classificationVersion) detail.append(' · classified with ruleset ' + event.classificationVersion);
+  const meaning = event.type === 'waf_finding' ? wafOutcomeMeaning(event) : null;
+  if (meaning) detail.append(' · ' + meaning);
+  if (event.requestId) detail.append(' · request ' + event.requestId);
+  row.append(heading, detail);
+  return row;
+}
+
+function securityEventParameters(before = null, beforeId = null) {
+  const parameters = new URLSearchParams({ limit: '250', since: securityActiveSince });
+  if (before) parameters.set('before', before);
+  if (beforeId) parameters.set('beforeId', beforeId);
+  for (const [kind, values] of Object.entries(securityFilters)) {
+    for (const value of values.keys()) parameters.append(kind, value);
+  }
+  return parameters;
+}
+
+async function exportSecurityCsv() {
+  securityExport.disabled = true;
+  elements.securityStatus.textContent = 'Preparing filtered CSV export…';
+  try {
+    const parameters = securityEventParameters();
+    parameters.delete('limit');
+    const response = await fetch('/api/security/events.csv?' + parameters, { cache: 'no-store' });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.error || 'Filtered security export is unavailable');
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(await response.blob());
+    link.download = 'scene-access-security-events-' + new Date().toISOString().replace(/[:.]/g, '-') + '.csv';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 0);
+    const count = Number(response.headers.get('X-Event-Count'));
+    elements.securityStatus.textContent = 'Exported ' + (Number.isInteger(count) ? count : 'the matching')
+      + ' filtered event' + (count === 1 ? '' : 's') + '.';
+  } catch (error) { elements.securityStatus.textContent = error.message; }
+  finally { securityExport.disabled = false; }
+}
+
+function renderSecurityEventPage(result, append = false) {
+  const rows = result.events.map(securityEventRow);
+  if (append) elements.securityEvents.append(...rows);
+  else if (rows.length) elements.securityEvents.replaceChildren(...rows);
+  else {
+    const empty = document.createElement('div');
+    empty.className = 'security-event'; empty.textContent = 'No security events match the active filters.';
+    elements.securityEvents.replaceChildren(empty);
+  }
+  securityLoadedCount = append ? securityLoadedCount + result.events.length : result.events.length;
+  securityNextBefore = result.nextBefore || null;
+  securityNextBeforeId = result.nextBeforeId || null;
+  elements.securityLoadOlder.hidden = !result.hasMore;
+}
+
 async function loadSecurity() {
   elements.securityStatus.textContent = 'Loading recent events…';
   elements.securityRefresh.disabled = true;
   try {
-    const parameters = new URLSearchParams({ limit: '250' });
-    for (const [kind, values] of Object.entries(securityFilters)) {
-      for (const value of values.keys()) parameters.append(kind, value);
-    }
-    const [summaryResponse, eventsResponse] = await Promise.all([
-      fetch('/api/security/summary', { cache: 'no-store' }),
+    const windowHours = elements.securityWindow.value;
+    const since = windowHours === 'all' ? 'all'
+      : new Date(Date.now() - Number(windowHours) * 60 * 60 * 1000).toISOString();
+    securityActiveSince = since;
+    const parameters = securityEventParameters();
+    const windowParameters = new URLSearchParams({ since });
+    const [summaryResponse, eventsResponse, mapResponse] = await Promise.all([
+      fetch('/api/security/summary?' + windowParameters, { cache: 'no-store' }),
       fetch('/api/security/events?' + parameters, { cache: 'no-store' }),
+      fetch('/api/security/map?' + windowParameters, { cache: 'no-store' }),
     ]);
-    if (!summaryResponse.ok || !eventsResponse.ok) throw new Error('Security monitoring is unavailable');
+    if (!summaryResponse.ok || !eventsResponse.ok || !mapResponse.ok) throw new Error('Security monitoring is unavailable');
     const summary = await summaryResponse.json();
     const result = await eventsResponse.json();
+    renderSecurityMap(await mapResponse.json());
     const options = result.filterOptions || { types: [], categories: [] };
     fillSecurityOptions(securityTypeAdd, options.types || [], readableSecurityValue, 'type',
       'No matching event types');
@@ -1400,55 +2086,61 @@ async function loadSecurity() {
       (value) => countryName(value) + ' (' + value + ')', 'country', 'No detected countries');
     await Promise.all([loadTelegram(), loadMaxMind()]);
     elements.securitySummary.replaceChildren(
-      securityMetric(summary.total, 'events · 24 hours'),
+      securityMetric(summary.total, windowHours === 'all' ? 'events · all retained'
+        : 'events · ' + elements.securityWindow.selectedOptions[0].textContent.toLowerCase()),
       securityMetric(summary.uniquePublicIps, 'public source IPs'),
       securityMetric(summary.successfulQr, 'successful QR sessions'),
       securityMetric(summary.failedLogin, 'failed login attempts'),
       securityMetric(summary.warnings, 'warnings'),
       securityMetric(summary.critical, 'critical signals'),
       securityMetric(summary.integrityFailures, 'integrity failures'),
+      securityMetric(summary.waf?.total || 0, 'WAF findings'),
+      securityMetric(summary.waf?.edgeRejected || 0, 'edge policy rejected · origin not reached'),
+      securityMetric(summary.waf?.blocked || 0, 'WAF blocked'),
+      securityMetric(summary.waf?.unknown || 0, 'observed · final outcome unverified'),
     );
-    const rows = result.events.map((event) => {
-      const row = document.createElement('div');
-      row.className = 'security-event ' + (event.integrityValid === false ? 'critical' : event.severity);
-      const heading = document.createElement('strong');
-      heading.textContent = (event.type === 'admin_action' ? 'administrator activity' : event.type.replaceAll('_', ' ')) + ' · '
-        + (event.integrityValid === false ? 'integrity check failed' : event.severity);
-      const detail = document.createElement('div');
-      detail.append(new Date(event.at).toLocaleString());
-      if (event.type === 'admin_action') {
-        detail.append(' · Scene Management · ' + adminActionLabel(event.reason));
-      } else {
-        appendSecuritySource(detail, event.source);
-        if (event.outcome) detail.append(' · ' + event.outcome);
-      }
-      if (event.category) detail.append(' · ' + readableSecurityValue(event.category));
-      if (event.http?.path) detail.append(' · ' + event.http.method + ' ' + event.http.path
-        + (event.http.status !== null ? ' → ' + event.http.status : ''));
-      if (event.requestId) detail.append(' · request ' + event.requestId);
-      row.append(heading, detail);
-      return row;
-    });
-    if (!rows.length) {
-      const empty = document.createElement('div');
-      empty.className = 'security-event';
-      empty.textContent = 'No security events match the active filters.';
-      rows.push(empty);
-    }
-    elements.securityEvents.replaceChildren(...rows);
+    renderSecurityEventPage(result);
     const geo = summary.geoip;
-    elements.securityStatus.textContent = 'Showing ' + result.events.length + ' event'
-      + (result.events.length === 1 ? '' : 's') + ' · retention: ' + summary.retentionDays + ' days · local GeoIP city '
+    elements.securityStatus.textContent = 'Showing ' + securityLoadedCount + ' of ' + summary.total + ' event'
+      + (summary.total === 1 ? '' : 's') + ' for ' + elements.securityWindow.selectedOptions[0].textContent.toLowerCase()
+      + (summary.oldestAt ? ' · oldest included: ' + new Date(summary.oldestAt).toLocaleString() : '')
+      + ' · retention: ' + summary.retentionDays + ' days · local GeoIP city '
       + (geo.city.loaded ? 'loaded' : 'not configured') + ' · ASN ' + (geo.asn.loaded ? 'loaded' : 'not configured')
       + ' · ledger ' + formatBytes(summary.storage.bytes) + ' / ' + formatBytes(summary.storage.maximumBytes)
       + (summary.storage.limited ? ' · storage limit reached' : '')
       + (summary.storage.suppressedSinceStart ? ' · ' + summary.storage.suppressedSinceStart + ' events suppressed' : '')
+      + ' · WAF ' + (summary.waf?.ingestion?.configured
+        ? (summary.waf.ingestion.mode || 'mode unknown') + ', telemetry '
+          + (summary.waf.ingestion.inputAvailable ? 'connected' : 'waiting for input')
+        : 'telemetry not configured')
+      + (summary.waf?.ingestion?.lastError ? ' (' + summary.waf.ingestion.lastError + ')' : '')
       + ' · locations are approximate';
   } catch (error) { elements.securityStatus.textContent = error.message; }
   finally { elements.securityRefresh.disabled = false; }
 }
+elements.securityLoadOlder.addEventListener('click', async () => {
+  if (!securityNextBefore) return;
+  elements.securityLoadOlder.disabled = true;
+  try {
+    const response = await fetch('/api/security/events?'
+      + securityEventParameters(securityNextBefore, securityNextBeforeId), { cache: 'no-store' });
+    if (!response.ok) throw new Error('Older security events are unavailable');
+    renderSecurityEventPage(await response.json(), true);
+    elements.securityLoadOlder.textContent = securityNextBefore ? 'Load older events' : 'Oldest retained event reached';
+  } catch (error) { elements.securityStatus.textContent = error.message; }
+  finally { elements.securityLoadOlder.disabled = false; }
+});
 elements.securityRefresh.addEventListener('click', loadSecurity);
-elements.securityPanel.addEventListener('toggle', () => { if (elements.securityPanel.open) loadSecurity(); });
+securityExport.addEventListener('click', exportSecurityCsv);
+elements.securityPanel.addEventListener('toggle', () => {
+  elements.workspace.classList.toggle('security-mode', elements.securityPanel.open);
+  elements.securityMap.hidden = !elements.securityPanel.open;
+  securityGlobe.setActive(elements.securityPanel.open);
+  elements.workspace.setAttribute('aria-label', elements.securityPanel.open
+    ? 'Interactive security connection map' : 'Scene preview');
+  if (elements.securityPanel.open) loadSecurity();
+  else requestAnimationFrame(fitFrame);
+});
 
 async function load(preserveScene = false) {
   state = await fetch('/api/state').then((response) => response.json());

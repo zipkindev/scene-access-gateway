@@ -20,13 +20,17 @@ const { DestinationRegistry } = require('./scene-destinations');
 const { getFirewallRegistration } = require('./firewall-registration');
 const { ArcadeLeaderboard } = require('./arcade-leaderboard');
 const { GeoIpLookup } = require('./geoip');
+const { createHostPolicy, matchesRequestOrigin } = require('./host-policy');
 const { MaxMindSetup } = require('./maxmind-setup');
 const { SecurityEvents, sourceIp } = require('./security-events');
 const { TelegramAlerts } = require('./telegram-alerts');
+const { WafIngestor } = require('./waf-ingestor');
 
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const ADMIN_PORT = process.env.ADMIN_PORT ? Number.parseInt(process.env.ADMIN_PORT, 10) : null;
 const ORIGIN = (process.env.PUBLIC_ORIGIN || 'http://localhost:8080').replace(/\/$/, '');
+const allowedHost = createHostPolicy(ORIGIN, process.env.PUBLIC_HOST_ALIASES);
+function sameOrigin(req) { return matchesRequestOrigin(req.headers.origin, ORIGIN, allowedHost); }
 const FIREWALL_ORIGIN = (process.env.FIREWALL_ORIGIN || 'http://localhost:8080').replace(/\/$/, '');
 const MANAGEMENT_SOURCE_IP = process.env.MANAGEMENT_SOURCE_IP || '127.0.0.1';
 const CHALLENGE_TTL = 15 * 60 * 1000;
@@ -40,9 +44,15 @@ const geoIp = new GeoIpLookup(process.env.GEOIP_CITY_DB_PATH || path.join(manage
   process.env.GEOIP_ASN_DB_PATH || path.join(managedGeoIpDirectory, 'GeoLite2-ASN.mmdb'));
 const maxMindSetup = new MaxMindSetup(DATA_DIR, geoIp,
   { managed: !process.env.GEOIP_CITY_DB_PATH && !process.env.GEOIP_ASN_DB_PATH });
-const securityEvents = new SecurityEvents(DATA_DIR, geoIp);
+const securityEvents = new SecurityEvents(DATA_DIR, geoIp, {
+  asyncWrites: true, destinationIp: process.env.SECURITY_MAP_DESTINATION_IP,
+});
 const telegramAlerts = new TelegramAlerts(DATA_DIR);
 securityEvents.subscribe((event) => telegramAlerts.enqueue(event));
+const wafIngestor = new WafIngestor(process.env.WAF_EVENT_INPUT_PATH || null, securityEvents, DATA_DIR,
+  { mode: process.env.WAF_MODE });
+securityEvents.wafStatus = () => wafIngestor.status();
+wafIngestor.start();
 const store = new PortalStore(DATA_DIR);
 const destinationRegistry = new DestinationRegistry(DATA_DIR);
 const firewallRegistration = getFirewallRegistration(DATA_DIR);
@@ -110,6 +120,7 @@ function requestDestination(token) {
 
 function cookie(req, name) { return (req.headers.cookie || '').split(';').map((x) => x.trim()).find((x) => x.startsWith(`${name}=`))?.slice(name.length + 1) || ''; }
 function browser(req) { const old = cookie(req, 'portal_browser'); if (/^[A-Za-z0-9_-]{43}$/.test(old)) return [old, null]; const value = crypto.randomBytes(32).toString('base64url'); return [value, `portal_browser=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`]; }
+function portalChallengeCookie(token) { return `portal_challenge=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`; }
 function currentChallenge(req) {
   const token = cookie(req, 'portal_challenge');
   const browserId = cookie(req, 'portal_browser');
@@ -134,12 +145,49 @@ function sequenceUnlocked(token, active, destinationId) {
       && clickSessions.get(token)?.unlocks.has(destinationId));
 }
 function ip(req) { return sourceIp(req); }
+function peerIp(req) {
+  const value = String(req.socket?.remoteAddress || '');
+  return value.startsWith('::ffff:') ? value.slice(7) : value;
+}
 function email(value) { const normalized = value.trim().toLowerCase(); return EMAIL.test(normalized) && normalized.length <= 254 ? normalized : null; }
 function identifier(value) { return normalizedEmail(value) || normalizedUsername(value); }
-function send(res, status, headers, body) { res.writeHead(status, { 'Cache-Control': 'no-store, max-age=0', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'", ...headers }); res.end(body); }
+function send(res, status, headers, body) { res.writeHead(status, { 'Cache-Control': 'no-store, max-age=0', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff', 'X-Permitted-Cross-Domain-Policies': 'none', 'Strict-Transport-Security': 'max-age=86400', 'Permissions-Policy': 'camera=(), geolocation=(), microphone=(), payment=(), usb=()', 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Resource-Policy': 'same-origin', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'", ...headers }); res.end(body); }
 function neutral(res, status = 200) { send(res, status, { 'Content-Type': 'text/html; charset=utf-8' }, submittedPage()); }
-function readForm(req) { return new Promise((resolve, reject) => { let body = ''; req.setEncoding('utf8'); req.on('data', (part) => { body += part; if (body.length > 2048) req.destroy(); }); req.on('end', () => resolve(new URLSearchParams(body))); req.on('error', reject); }); }
-function readJson(req) { return new Promise((resolve, reject) => { let body = ''; let bytes = 0; req.setEncoding('utf8'); req.on('data', (part) => { bytes += Buffer.byteLength(part); if (bytes > 4096) { reject(new Error('Request too large')); req.destroy(); return; } body += part; }); req.on('end', () => { try { const value = JSON.parse(body || '{}'); if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error('Invalid JSON'); resolve(value); } catch (error) { reject(error); } }); req.on('error', reject); }); }
+function scriptResponse(req, res, url, body) {
+  const versioned = /^[A-Za-z0-9_-]{1,64}$/.test(url.searchParams.get('v') || '');
+  return send(res, 200, { 'Content-Type': 'text/javascript; charset=utf-8',
+    'Cache-Control': versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=3600' },
+  req.method === 'HEAD' ? '' : body);
+}
+function readText(req, maximum) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    let bytes = 0;
+    let failed = false;
+    req.setEncoding('utf8');
+    req.on('data', (part) => {
+      if (failed) return;
+      bytes += Buffer.byteLength(part);
+      if (bytes > maximum) {
+        failed = true;
+        const error = new Error('Request too large');
+        error.code = 'REQUEST_TOO_LARGE';
+        reject(error);
+      } else body += part;
+    });
+    req.on('end', () => { if (!failed) resolve(body); });
+    req.on('aborted', () => {
+      if (!failed) { failed = true; reject(Object.assign(new Error('Request aborted'), { code: 'REQUEST_ABORTED' })); }
+    });
+    req.on('error', (error) => { if (!failed) { failed = true; reject(error); } });
+  });
+}
+async function readForm(req) { return new URLSearchParams(await readText(req, 2048)); }
+async function readJson(req) {
+  const value = JSON.parse((await readText(req, 4096)) || '{}');
+  if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error('Invalid JSON');
+  return value;
+}
 function issueAssertion(session) { if (!assertionIssuer) assertionIssuer = new AssertionIssuer(); return assertionIssuer.issue(session); }
 async function deliver(to, token) { if (!mailer) mailer = createMailer(loadSmtpConfig()); return mailer.sendMail({ from: loadSmtpConfig().from, to, subject: 'Confirm access', text: `Open this link to confirm access:\n${ORIGIN}/verify/${token}\n\nThis link expires in 15 minutes.` }); }
 function security(type, req, url, data = {}) {
@@ -148,9 +196,10 @@ function security(type, req, url, data = {}) {
   catch (error) { console.error(JSON.stringify({ event: 'security_event_write_failed', type, error: error.code || error.name || 'Error' })); return null; }
 }
 
-const server = http.createServer(async (req, res) => {
+async function handleRequest(req, res) {
   req.securityRequestId = crypto.randomUUID();
   res.setHeader('X-Request-ID', req.securityRequestId);
+  if (typeof req.url !== 'string' || !req.url.startsWith('/')) return send(res, 400, {}, '');
   store.purge(); const url = new URL(req.url, ORIGIN);
   const securityUrl = new URL(url);
   res.once('finish', () => {
@@ -158,6 +207,8 @@ const server = http.createServer(async (req, res) => {
     catch (error) { console.error(JSON.stringify({ event: 'security_event_write_failed', type: 'suspicious_request', error: error.code || error.name || 'Error' })); }
   });
   if (url.pathname === '/healthz') return send(res, ['GET', 'HEAD'].includes(req.method) ? 200 : 405, { 'Content-Type': 'text/plain' }, req.method === 'HEAD' ? '' : 'ok\n');
+  if (!allowedHost(req.headers.host)) return send(res, 421, { 'Content-Type': 'text/plain; charset=utf-8' }, 'Misdirected Request\n');
+  if (!['GET', 'HEAD', 'POST'].includes(req.method || '')) return send(res, 405, { Allow: 'GET, HEAD, POST' }, '');
   if (url.pathname === '/wolf3d' && ['GET', 'HEAD'].includes(req.method)) return send(res, 308, { Location: '/wolf3d/' }, '');
   const wolfPath = url.pathname === '/wolf3d/' ? '/wolf3d/index.html' : url.pathname;
   if (wolfAssets.has(wolfPath) && ['GET', 'HEAD'].includes(req.method)) {
@@ -169,15 +220,15 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, headers, req.method === 'HEAD' ? '' : asset);
   }
   if (artwork.has(url.pathname) && ['GET', 'HEAD'].includes(req.method)) { const asset = artwork.get(url.pathname); return send(res, 200, { 'Content-Type': 'image/png', 'Content-Length': asset.length, 'Cache-Control': 'public, max-age=31536000, immutable' }, req.method === 'HEAD' ? '' : asset); }
-  if (url.pathname === '/scene-motion.js' && ['GET', 'HEAD'].includes(req.method)) return send(res, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }, req.method === 'HEAD' ? '' : motionScript);
-  if (url.pathname === '/scene-framing.js' && ['GET', 'HEAD'].includes(req.method)) return send(res, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }, req.method === 'HEAD' ? '' : framingScript);
-  if (url.pathname === '/scene-game.js' && ['GET', 'HEAD'].includes(req.method)) return send(res, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }, req.method === 'HEAD' ? '' : gameScript);
-  if (url.pathname === '/future-motion-runtime.js' && ['GET', 'HEAD'].includes(req.method)) return send(res, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }, req.method === 'HEAD' ? '' : futureMotionScript);
-  if (url.pathname === '/future-feature-clicks.js' && ['GET', 'HEAD'].includes(req.method)) return send(res, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }, req.method === 'HEAD' ? '' : featureClicksScript);
-  if (url.pathname === '/future-game-carousel.js' && ['GET', 'HEAD'].includes(req.method)) return send(res, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }, req.method === 'HEAD' ? '' : futureGameCarouselScript);
-  if (url.pathname === '/future-nature-audio.js' && ['GET', 'HEAD'].includes(req.method)) return send(res, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }, req.method === 'HEAD' ? '' : futureNatureAudioScript);
-  if (url.pathname === '/future-sample-audio.js' && ['GET', 'HEAD'].includes(req.method)) return send(res, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }, req.method === 'HEAD' ? '' : futureSampleAudioScript);
-  if (url.pathname === '/future-wolf3d-crt.js' && futureWolfCrtScript && ['GET', 'HEAD'].includes(req.method)) return send(res, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }, req.method === 'HEAD' ? '' : futureWolfCrtScript);
+  if (url.pathname === '/scene-motion.js' && ['GET', 'HEAD'].includes(req.method)) return scriptResponse(req, res, url, motionScript);
+  if (url.pathname === '/scene-framing.js' && ['GET', 'HEAD'].includes(req.method)) return scriptResponse(req, res, url, framingScript);
+  if (url.pathname === '/scene-game.js' && ['GET', 'HEAD'].includes(req.method)) return scriptResponse(req, res, url, gameScript);
+  if (url.pathname === '/future-motion-runtime.js' && ['GET', 'HEAD'].includes(req.method)) return scriptResponse(req, res, url, futureMotionScript);
+  if (url.pathname === '/future-feature-clicks.js' && ['GET', 'HEAD'].includes(req.method)) return scriptResponse(req, res, url, featureClicksScript);
+  if (url.pathname === '/future-game-carousel.js' && ['GET', 'HEAD'].includes(req.method)) return scriptResponse(req, res, url, futureGameCarouselScript);
+  if (url.pathname === '/future-nature-audio.js' && ['GET', 'HEAD'].includes(req.method)) return scriptResponse(req, res, url, futureNatureAudioScript);
+  if (url.pathname === '/future-sample-audio.js' && ['GET', 'HEAD'].includes(req.method)) return scriptResponse(req, res, url, futureSampleAudioScript);
+  if (url.pathname === '/future-wolf3d-crt.js' && futureWolfCrtScript && ['GET', 'HEAD'].includes(req.method)) return scriptResponse(req, res, url, futureWolfCrtScript);
   if (audioSamples.has(url.pathname) && ['GET', 'HEAD'].includes(req.method)) { const asset=audioSamples.get(url.pathname);return send(res,200,{'Content-Type':'audio/mpeg','Content-Length':asset.length,'Cache-Control':'public, max-age=31536000, immutable'},req.method==='HEAD'?'':asset); }
   if (bundleManifests.has(url.pathname) && ['GET', 'HEAD'].includes(req.method)) { const body = bundleManifests.get(url.pathname); return send(res, 200, { 'Content-Type': 'application/json', 'Content-Length': body.length, 'Cache-Control': 'public, max-age=3600' }, req.method === 'HEAD' ? '' : body); }
   const uploaded = /^\/assets\/uploads\/(img-[a-f0-9]{48})\.(png|webp)$/.exec(url.pathname);
@@ -194,7 +245,7 @@ const server = http.createServer(async (req, res) => {
     catch (_) { return send(res, 400, { 'Content-Type': 'application/json; charset=utf-8' }, '{"board":[]}'); }
   }
   if (url.pathname === '/api/arcade/scores' && req.method === 'POST') {
-    if (req.headers.origin !== ORIGIN) return send(res, 403, {}, '');
+    if (!sameOrigin(req)) return send(res, 403, {}, '');
     const sourceIp = ip(req);
     if (!store.allowAttempt(sourceIp, 'arcade-score:' + sourceIp, 12, 12)) return send(res, 429, {}, '');
     try { const result = arcadeLeaderboard.submit(await readJson(req)); return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8' }, JSON.stringify(result)); }
@@ -202,14 +253,13 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === '/') {
     if (!['GET', 'HEAD'].includes(req.method)) return send(res, 405, { Allow: 'GET, HEAD', 'Content-Type': 'text/html; charset=utf-8' }, methodPage());
-    const [browserId, browserCookie] = browser(req); const token = store.createChallenge(tokenHash(browserId), Date.now() + CHALLENGE_TTL);
+    const [, browserCookie] = req.method === 'GET' ? browser(req) : [null, null];
     const nonce = crypto.randomBytes(18).toString('base64');
     const publicScene = sceneStore.active().scene;
     if (!firewallActive()) publicScene.hotspots = publicScene.hotspots.filter((item) => item.destinationId !== 'firewall');
     const body = landingPage(null, null, nonce, publicScene, backgrounds());
-    const challengeCookie = `portal_challenge=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`;
-    if (req.method === 'GET') security('portal_visit', req, url, { outcome: 'challenge_created', status: 200, destination: 'torrentharbor' });
-    return send(res, 200, { 'Content-Security-Policy': `default-src 'none'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'self' ${FIREWALL_ORIGIN}; frame-ancestors 'none'`, 'Referrer-Policy': 'strict-origin', 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': browserCookie ? [browserCookie, challengeCookie] : challengeCookie }, req.method === 'HEAD' ? '' : body);
+    if (req.method === 'GET') security('portal_visit', req, url, { outcome: 'page_served', status: 200 });
+    return send(res, 200, { 'Content-Security-Policy': `default-src 'none'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'self' ${FIREWALL_ORIGIN}; frame-ancestors 'none'`, 'Referrer-Policy': 'strict-origin', 'Content-Type': 'text/html; charset=utf-8', ...(browserCookie ? { 'Set-Cookie': browserCookie } : {}) }, req.method === 'HEAD' ? '' : body);
   }
   if (url.pathname === '/challenge/current/qr' && req.method === 'GET') {
     const [token, challenge] = currentChallenge(req);
@@ -224,29 +274,40 @@ const server = http.createServer(async (req, res) => {
     url.pathname = '/challenge/' + token;
   }
   if (url.pathname === '/api/scene/hit' && req.method === 'POST') {
-    if (req.headers.origin !== ORIGIN) return send(res, 403, {}, '');
-    const [token, challenge] = currentChallenge(req);
-    if (!challenge || challenge.status !== 'pending' || Date.parse(challenge.expiresAt) <= Date.now()) return send(res, 404, {}, '');
+    if (!sameOrigin(req)) return send(res, 403, {}, '');
+    const [browserId, browserCookie] = browser(req);
+    const responseCookies = browserCookie ? [browserCookie] : [];
     let point;
     try { point = await readJson(req); } catch (_) { return send(res, 400, {}, ''); }
     const active = sceneStore.active();
-    const session = clickSession(token, active.activationId || active.revisionId);
+    const session = clickSession(browserId, active.activationId || active.revisionId);
     const result = advanceSceneClick(active.scene, point.x, point.y,
       point.width, point.height, firewallActive(), session.progress, Date.now());
     session.progress = result.progress;
     if (result.destination && needsSequence(active.scene, result.destination)) session.unlocks.add(result.destination);
     const destination = result.destination;
-    return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8' }, JSON.stringify({ destination }));
+    if (destination === 'torrentharbor') {
+      let [token, challenge] = currentChallenge(req);
+      if (!challenge || challenge.status !== 'pending' || Date.parse(challenge.expiresAt) <= Date.now()) {
+        token = store.createChallenge(tokenHash(browserId), Date.now() + CHALLENGE_TTL);
+        responseCookies.push(portalChallengeCookie(token));
+        security('qr_challenge_created', req, url, { outcome: 'challenge_created', status: 200,
+          destination: 'torrentharbor' });
+      }
+      clickSessions.set(token, session);
+    }
+    const accepted = Boolean(destination || result.progress);
+    const acceptedStep = result.progress ? result.progress.next : (destination ? 'complete' : 0);
+    return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8',
+      ...(responseCookies.length ? { 'Set-Cookie': responseCookies } : {}) },
+    JSON.stringify({ destination, accepted, acceptedStep }));
   }
   if (url.pathname === '/api/challenge/firewall' && req.method === 'POST') {
     if (!firewallActive()) return send(res, 404, {}, '');
-    if (req.headers.origin !== ORIGIN) return send(res, 403, {}, '');
-    const [pageToken, pageChallenge] = currentChallenge(req);
-    if (needsSequence(sceneStore.active().scene, 'firewall') &&
-        (!pageChallenge || pageChallenge.status !== 'pending' ||
-         Date.parse(pageChallenge.expiresAt) <= Date.now() ||
-         !sequenceUnlocked(pageToken, sceneStore.active(), 'firewall'))) return send(res, 404, {}, '');
+    if (!sameOrigin(req)) return send(res, 403, {}, '');
     const [browserId, browserCookie] = browser(req);
+    if (needsSequence(sceneStore.active().scene, 'firewall') &&
+        !sequenceUnlocked(browserId, sceneStore.active(), 'firewall')) return send(res, 404, {}, '');
     const priorToken = cookie(req, 'portal_firewall_challenge');
     const prior = /^[A-Za-z0-9_-]{43}$/.test(priorToken)
       ? store.getChallenge(priorToken, tokenHash(browserId)) : null;
@@ -255,6 +316,8 @@ const server = http.createServer(async (req, res) => {
     if (!reusable && !store.allowAttempt(ip(req), 'firewall-challenge', 12, 100)) return send(res, 429, {}, '');
     const token = reusable ? priorToken : store.createChallenge(tokenHash(browserId), Date.now() + CHALLENGE_TTL, 'firewall');
     const qr = await QRCode.toString(`${ORIGIN}/login/${token}`, { type: 'svg', errorCorrectionLevel: 'H', margin: 1 });
+    if (!reusable) security('qr_challenge_created', req, url, { outcome: 'challenge_created',
+      status: 200, destination: 'firewall' });
     const challengeCookie = `portal_firewall_challenge=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`;
     return send(res, 200, { 'Content-Type': 'application/json', 'Set-Cookie': browserCookie ? [browserCookie, challengeCookie] : challengeCookie }, JSON.stringify({ qr, token }));
   }
@@ -262,7 +325,7 @@ const server = http.createServer(async (req, res) => {
   if (registration && ['GET', 'POST'].includes(req.method)) {
     if (!firewallRegistration.preview(registration[1])) return neutral(res, 404);
     if (req.method === 'POST') {
-      if (req.headers.origin !== ORIGIN) return neutral(res, 403);
+      if (!sameOrigin(req)) return neutral(res, 403);
       try { await firewallRegistration.confirm(registration[1]); return send(res, 200, { 'Content-Type': 'text/html; charset=utf-8' }, confirmedPage()); }
       catch (_) { return neutral(res, 404); }
     }
@@ -346,7 +409,7 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { 'Content-Type': 'application/json' }, '{}');
   }
   if (url.pathname === '/internal/firewall-handoff' && req.method === 'POST') {
-    if (!firewallActive() || req.headers.origin !== ORIGIN
+    if (!firewallActive() || !sameOrigin(req)
       || req.headers['x-portal-handoff'] !== 'firewall-v1'
       || String(req.headers['content-type'] || '').toLowerCase().split(';')[0].trim() !== 'application/x-www-form-urlencoded')
       return send(res, 403, {}, '');
@@ -406,7 +469,7 @@ const server = http.createServer(async (req, res) => {
     } catch (_) { return send(res, 403, {}, ''); }
   }
   if (url.pathname.startsWith('/internal/torrentharbor-management/')) {
-    if (req.headers['x-management-source-ip'] !== MANAGEMENT_SOURCE_IP) return send(res, 404, {}, '');
+    if (peerIp(req) !== MANAGEMENT_SOURCE_IP) return send(res, 404, {}, '');
     const acceptsJson = !req.headers.accept || req.headers.accept === '*/*' || req.headers.accept.split(',').some((value) => value.trim().split(';')[0] === 'application/json');
     const jsonRequest = req.method === 'GET' || String(req.headers['content-type'] || '').toLowerCase().split(';')[0].trim() === 'application/json';
     if (!acceptsJson || !jsonRequest) return send(res, 404, { 'Content-Type': 'application/json' }, '{}');
@@ -435,10 +498,52 @@ const server = http.createServer(async (req, res) => {
   }
   security('request_rejected', req, url, { outcome: 'not_found', severity: 'warning', status: 404 });
   return send(res, 404, { 'Content-Type': 'text/html; charset=utf-8' }, notFoundPage());
-});
+}
+
+function hardenedServer(handler, requestTimeout = 15000) {
+  const instance = http.createServer((request, response) => {
+    Promise.resolve(handler(request, response)).catch((error) => {
+      console.error(JSON.stringify({ event: 'request_failed', requestId: request.securityRequestId || null,
+        error: error?.code || error?.name || 'Error' }));
+      if (response.headersSent) return response.destroy();
+      const status = error?.code === 'REQUEST_TOO_LARGE' ? 413
+        : error?.code === 'REQUEST_ABORTED' ? 400 : 500;
+      send(response, status, { 'Content-Type': 'text/plain; charset=utf-8' }, 'Request could not be completed\n');
+    });
+  });
+  instance.requestTimeout = requestTimeout;
+  instance.headersTimeout = 10000;
+  instance.keepAliveTimeout = 5000;
+  instance.maxRequestsPerSocket = 500;
+  instance.on('clientError', (_error, socket) => {
+    if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+  });
+  return instance;
+}
+
+const server = hardenedServer(handleRequest);
+let adminServer = null;
 if (require.main === module) server.listen(PORT, '0.0.0.0', () => console.log(`Access portal listening on ${PORT}`));
 if (require.main === module && ADMIN_PORT) {
-  const adminServer = http.createServer(createSceneAdmin(DATA_DIR, securityEvents, telegramAlerts, maxMindSetup));
+  adminServer = hardenedServer(createSceneAdmin(DATA_DIR, securityEvents, telegramAlerts, maxMindSetup), 60000);
   adminServer.listen(ADMIN_PORT, '0.0.0.0', () => console.log(`Access scene management listening on ${ADMIN_PORT}`));
+}
+if (require.main === module) {
+  const shutdown = async () => {
+    const deadline = setTimeout(() => process.exit(1), 8000);
+    deadline.unref();
+    const close = (instance) => new Promise((resolve) => {
+      if (!instance?.listening) return resolve();
+      instance.close(resolve);
+    });
+    try {
+      await Promise.all([close(server), close(adminServer)]);
+      wafIngestor.stop();
+      await securityEvents.flush();
+      process.exit(0);
+    } catch (_) { process.exit(1); }
+  };
+  process.once('SIGTERM', () => void shutdown());
+  process.once('SIGINT', () => void shutdown());
 }
 module.exports = { server };

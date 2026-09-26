@@ -25,3 +25,10 @@ Initialize protected local secret files with `../scripts/init-secrets.sh`, then
 review [the configuration guide](../docs/configuration/README.md). Production
 identity changes require separate review; importing a blueprint or starting a
 local Compose overlay is not deployment approval.
+
+When onboarding an application, declare its group, relay requirement, and
+assertion audience in `../deploy/applications.json` before changing Authentik.
+Relay-enabled applications must retain an end-to-end `authentik-relay`
+verification journey; a group alone is not proof that proxy and audience
+contracts agree. Applications such as the firewall can use Authentik-backed
+approval membership while deliberately retaining their own destination login.

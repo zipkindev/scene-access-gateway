@@ -1,0 +1,58 @@
+# TLS-only OWASP CRS edge. A hardened production deployment can share the
+# origin proxy's network namespace and forward only to its loopback listener.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+proxy_headers_hash_max_size 1024;
+proxy_headers_hash_bucket_size 128;
+
+server {
+    listen ${WAF_LISTEN_PORT} ssl default_server;
+    listen [::]:${WAF_LISTEN_PORT} ssl default_server;
+    server_name _;
+
+    ssl_certificate ${SSL_CERT_FILE};
+    ssl_certificate_key ${SSL_CERT_KEY_FILE};
+    ssl_protocols ${SSL_PROTOCOLS};
+    ssl_ciphers ${SSL_CIPHERS};
+
+    location / { return 444; }
+}
+
+server {
+    listen ${WAF_LISTEN_PORT} ssl;
+    listen [::]:${WAF_LISTEN_PORT} ssl;
+    server_name ${WAF_SERVER_NAMES};
+
+    ssl_certificate ${SSL_CERT_FILE};
+    ssl_certificate_key ${SSL_CERT_KEY_FILE};
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:WAFSSL:10m;
+    ssl_session_tickets off;
+    ssl_dhparam /etc/ssl/certs/dhparam-${SSL_DH_BITS}.pem;
+    ssl_protocols ${SSL_PROTOCOLS};
+    ssl_ciphers ${SSL_CIPHERS};
+    ssl_prefer_server_ciphers ${SSL_PREFER_CIPHERS};
+    ssl_stapling off;
+
+    # Use the Nginx request identifier as the ModSecurity transaction key so
+    # normalized WAF findings can be correlated without retaining headers.
+    modsecurity_transaction_id $request_id;
+
+    PROXY_SSL_CONFIG
+
+    location / {
+        client_max_body_size 16m;
+        include includes/proxy_backend.conf;
+
+        # Replace all caller-controlled forwarding identity. The origin may
+        # trust these fields only when they arrive from this WAF hop.
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
+    include includes/location_common.conf;
+}

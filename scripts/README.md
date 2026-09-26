@@ -8,15 +8,21 @@ The intended interface is:
 - `check-prerequisites.sh`: verify Git, Docker, and Compose;
 - `bootstrap.sh`: create ignored local directories and example configuration;
 - `init-secrets.sh`: create protected local Authentik/PostgreSQL secret files;
-- `test.sh`: run source, unit, and configuration validation;
+- `test.sh`: run source, unit, and configuration validation, including the
+  host-neutral WAF Compose policy and application-onboarding contracts;
+- `check-application-contracts.js`: reject incomplete route, identity, QR,
+  proxy, CSP, WAF-exception, or acceptance-journey declarations;
+- `check-waf.sh`: reject environment-specific values and validate the tracked
+  WAF deployment model with non-secret placeholders;
 - `smoke-test.sh`: launch and remove an isolated local route-test stack;
-- `build.sh`: build immutable frontend and backend image tags;
+- `build.sh`: build immutable frontend, backend, and WAF image tags;
 - `fetch-scene-assets.sh`: use verified local audio when configured, otherwise
   build the public profile without optional third-party audio;
 - `import-audio.sh`: verify and install all eight locally licensed audio files;
 - `update-geoip.sh`: download current GeoLite2 City and ASN databases using
   protected MaxMind credential files;
-- `export-images.sh` / `load-images.sh`: support air-gapped hosts;
+- `export-images.sh` / `load-images.sh`: transfer all three images to
+  air-gapped hosts;
 - `up.sh` / `down.sh`: wrap ordinary Compose lifecycle operations;
 - `sync-branch.sh`: rebase, test, and safely push an already committed branch.
 

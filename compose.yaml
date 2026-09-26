@@ -40,6 +40,7 @@ services:
       ADMIN_PORT: "8082"
       ADMIN_ORIGIN: ${SAG_EDITOR_ORIGIN:-http://localhost:8081}
       PUBLIC_ORIGIN: ${SAG_PUBLIC_ORIGIN:-http://localhost:8080}
+      PUBLIC_HOST_ALIASES: ${SAG_PUBLIC_HOST_ALIASES:-}
       FIREWALL_ORIGIN: ${SAG_FIREWALL_ORIGIN:-http://localhost:8080}
       FIREWALL_UPSTREAM: ${SAG_FIREWALL_UPSTREAM:-https://firewall.example.invalid/}
       FIREWALL_UPSTREAM_IP: ${SAG_FIREWALL_UPSTREAM_IP:-127.0.0.1}
@@ -51,6 +52,10 @@ services:
       PORTAL_OWNER_USERNAME: ${SAG_PORTAL_OWNER_USERNAME:-owner}
       SECURITY_EVENT_RETENTION_DAYS: ${SAG_SECURITY_EVENT_RETENTION_DAYS:-30}
       SECURITY_EVENT_MAX_BYTES: ${SAG_SECURITY_EVENT_MAX_BYTES:-67108864}
+      SECURITY_MAP_DESTINATION_IP: ${SAG_SECURITY_MAP_DESTINATION_IP:-}
+      SOURCE_INTELLIGENCE_ACTIVE_ENABLED: ${SAG_SOURCE_INTELLIGENCE_ACTIVE_ENABLED:-false}
+      SOURCE_INTELLIGENCE_WORKER_URL: http://source-intelligence:8090
+      SOURCE_INTELLIGENCE_WORKER_TOKEN_PATH: /run/secrets/source-intelligence-token
       DATA_DIR: /var/lib/scene-access-gateway
       SMTP_CONFIG_PATH: /run/secrets/smtp.env
       AUTHENTIK_API_BASE_URL: ${SAG_AUTHENTIK_API_BASE_URL:-http://frontend:8080}
@@ -71,6 +76,8 @@ services:
       - /tmp
     volumes:
       - portal_data:/var/lib/scene-access-gateway
+    secrets:
+      - source-intelligence-token
     cap_drop:
       - ALL
     security_opt:
@@ -83,11 +90,53 @@ services:
       start_period: 5s
     networks:
       - private
+    depends_on:
+      source-intelligence:
+        condition: service_healthy
+
+  source-intelligence:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: ${SAG_IMAGE_NAMESPACE:-scene-access-gateway}/backend:${SAG_IMAGE_TAG:-dev}
+    command: ["node", "source-intelligence-worker.js"]
+    environment:
+      SOURCE_INTELLIGENCE_ACTIVE_ENABLED: ${SAG_SOURCE_INTELLIGENCE_ACTIVE_ENABLED:-false}
+      PROTECTED_DESTINATION_IP: ${SAG_SECURITY_MAP_DESTINATION_IP:-}
+      SOURCE_INTELLIGENCE_WORKER_TOKEN_PATH: /run/secrets/source-intelligence-token
+    read_only: true
+    secrets:
+      - source-intelligence-token
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: 0.50
+    expose:
+      - "8090"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - private
+      - intelligence-egress
 
 volumes:
   portal_data:
+
+secrets:
+  source-intelligence-token:
+    file: ./.local/secrets/source-intelligence-token
 
 networks:
   ingress:
   private:
     internal: true
+  intelligence-egress:

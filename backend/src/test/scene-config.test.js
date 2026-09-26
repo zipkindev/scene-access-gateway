@@ -21,6 +21,20 @@ test('default scene preserves the rendered background and original Z hotspot', (
     destinationId: 'torrentharbor', activation: 'qr-popup', visible: false, enabled: true,
   });
   assert.equal(scene.publicText, false);
+  assert.deepEqual(scene.diagnostics, { clickDebugger: false });
+});
+
+test('click debugging is opt-in and remains backward compatible', () => {
+  const legacy = structuredClone(DEFAULT_SCENE);
+  delete legacy.diagnostics;
+  assert.deepEqual(validateScene(legacy).diagnostics, { clickDebugger: false });
+
+  const enabled = structuredClone(DEFAULT_SCENE);
+  enabled.diagnostics.clickDebugger = true;
+  assert.equal(validateScene(enabled).diagnostics.clickDebugger, true);
+
+  enabled.diagnostics.clickDebugger = 'true';
+  assert.throws(() => validateScene(enabled), /invalid click debugger state/);
 });
 
 test('scene validation refuses public text, arbitrary destinations, and duplicate hotspots', () => {

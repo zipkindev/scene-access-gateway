@@ -8,11 +8,25 @@ const { FIREWALL_PUBLIC } = require('./destination-plan');
 const IDENTIFIER = /^[a-z][a-z0-9-]{1,47}$/;
 const RESERVED = new Set(['api', 'assets', 'challenge', 'healthz', 'internal', 'login', 'logout', 'request-access', 'torrentharbor', 'verify']);
 
+function legacyFirewallRoute() {
+  const url = new URL(FIREWALL_PUBLIC);
+  if (url.protocol !== 'https:' || url.port) return null;
+  url.port = '44334';
+  return url.href;
+}
+
 class DestinationRegistry {
   constructor(dataDirectory) {
     this.file = path.join(dataDirectory, 'scene-management', 'destinations.json');
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     if (!fs.existsSync(this.file)) this._write({ schemaVersion: 1, destinations: [] });
+    const value = this._read(true);
+    const firewall = value.destinations.find((item) => item.id === 'firewall');
+    const legacy = legacyFirewallRoute();
+    if (firewall && legacy && firewall.route === legacy) {
+      firewall.route = FIREWALL_PUBLIC;
+      this._write(value);
+    }
     this.list();
   }
 
@@ -22,13 +36,16 @@ class DestinationRegistry {
     fs.renameSync(temporary, this.file);
   }
 
-  _read() {
+  _read(allowLegacyFirewallRoute = false) {
     const value = JSON.parse(fs.readFileSync(this.file, 'utf8'));
     if (!value || value.schemaVersion !== 1 || !Array.isArray(value.destinations)) throw new Error('Invalid destination registry');
     const ids = new Set();
     for (const item of value.destinations) {
+      const expectedRoute = item.id === 'firewall' ? FIREWALL_PUBLIC : '/' + item.id + '/';
+      const routeMatches = item.route === expectedRoute
+        || allowLegacyFirewallRoute && item.id === 'firewall' && item.route === legacyFirewallRoute();
       if (!IDENTIFIER.test(item.id) || RESERVED.has(item.id) || ids.has(item.id)
-        || item.route !== (item.id === 'firewall' ? FIREWALL_PUBLIC : '/' + item.id + '/') || !['pending', 'active'].includes(item.status)
+        || !routeMatches || !['pending', 'active'].includes(item.status)
         || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 80
         || (item.status === 'active' && (!item.receipt || !/^[a-f0-9]{64}$/.test(item.receipt.proxySha256 || '')
           || !/^[a-f0-9]{64}$/.test(item.receipt.routerSha256 || '')))) {

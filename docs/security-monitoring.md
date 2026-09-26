@@ -2,7 +2,8 @@
 
 Scene Access Gateway records application-level security events in a protected,
 rotating JSON Lines ledger under the portal data volume. The authenticated
-Scene Management interface shows a 24-hour summary and the latest 100 events.
+Scene Management interface defaults to a 24-hour summary and pages up to 250
+matching events at a time across configurable retained windows.
 
 This complements, rather than replaces, the reverse-proxy access log,
 Authentik events, firewall telemetry, a WAF, or an intrusion-prevention tool.
@@ -12,7 +13,8 @@ never reach an application route.
 
 ## Recorded events
 
-- portal visits that create a QR challenge;
+- portal page views, recorded as `page_served` without allocating a QR challenge;
+- QR challenges created only after the server accepts the configured destination sequence;
 - valid-format QR login page opens;
 - rejected and accepted login/email-delivery outcomes;
 - successful email confirmation and portal-session creation;
@@ -35,13 +37,13 @@ usernames are keyed hashes.
 QR tokens, cookies, passwords, access tokens, request bodies, query strings,
 and full user-agent strings are never written to the security ledger.
 
-The frontend writes JSON access records to standard output. These contain the
-exact request target, full user agent, source address, response status, timing,
-Nginx edge request ID, and backend request ID. Treat these records as protected
-security data: the exact target may contain a QR token or a query value. Apply
-bounded retention and restricted access in the container logging driver or
-central log platform. Do not paste unredacted access records into tickets or
-chat.
+The frontend writes JSON access records to standard output. These contain a
+normalized route without the query string, full user agent, source address,
+response status, timing, Nginx edge request ID, and backend request ID. Login,
+verification, and challenge tokens are replaced with `:token`. Treat these
+records as protected security data anyway: source addresses and user agents
+may still be personal or identifying. Apply bounded retention and restricted
+access in the container logging driver or central log platform.
 
 ## Alert investigation
 
@@ -52,7 +54,7 @@ ledger is persistent but the container log may not be.
 1. Record the alert window in UTC, category, source address, normalized path,
    response status, and request ID from Scene Management.
 2. Search the frontend JSON access log for the same `backend_request_id`. This
-   returns the exact `request_uri`, edge status, timing, and user agent.
+   returns the normalized `route`, edge status, timing, and user agent.
 3. Group surrounding records by `remote_addr`, user agent, method, target, and
    status. Compare their times with Authentik, TLS-edge, firewall, and upstream
    application logs.
@@ -88,6 +90,12 @@ off-host unless an approved incident-response process requires it.
 The backend accepts `X-Portal-Source-IP` only because it is private on the
 Compose network and the public Nginx gateway overwrites that header. Never
 publish the backend port directly.
+
+The public listener removes `X-Management-Source-IP` and denies
+`/internal/torrentharbor-management/`. A trusted management caller must use the
+private backend network; the backend compares its direct TCP peer address with
+`MANAGEMENT_SOURCE_IP`. Forwarded source headers are never sufficient for
+management authorization.
 
 If another reverse proxy terminates public TLS, configure that proxy to
 replace client-IP headers and configure Nginx to trust only the exact proxy
@@ -160,6 +168,22 @@ IP. Events written before the databases were mounted are enriched at read time,
 without rewriting the integrity-protected ledger. Private and loopback sources
 are identified by scope and are never sent to a lookup service.
 
+Opening **Security monitoring** replaces the scene preview with an interactive
+24-hour connection map. Each red hotspot represents a public source IP with
+local GeoLite2 City coordinates; its size reflects the number of recorded
+application and WAF events. Routes terminate at the deployment's public ISP
+address. Select a hotspot to apply the existing exact-source filter to the
+event list, select it again or select the map background to clear that filter.
+The other routes remain visible in a muted color for context.
+
+Set `SAG_SECURITY_MAP_DESTINATION_IP` to the public IP where the WAF or gateway
+receives traffic. If it is unset, Scene Management can use the most frequent
+numeric WAF target in the current event window. The destination and all source
+locations are resolved only through the same local GeoIP database; no address
+is submitted to an external map or geolocation service. Without a loaded City
+database, the security console continues to work and the map explains why no
+coordinates can be drawn.
+
 ## Event filters
 
 The controls directly above the event list can be combined:
@@ -182,6 +206,40 @@ Authenticated configuration changes are labeled as **Administrator activity**
 from **Scene Management**, with a readable action such as a MaxMind database
 update or Telegram policy change. They are not displayed as unknown network
 sources.
+
+## Source intelligence and ethical reconnaissance
+
+Selecting one exact public IP exposes **Source intelligence** directly inside
+Security Monitoring. **Investigate source** creates a deterministic case file
+containing retained application/WAF evidence, local GeoLite city and ASN data,
+forward-confirmed reverse DNS, authoritative RDAP allocation data, and RIPEstat
+routing context. Results identify the registered network and likely
+infrastructure class; they do not identify the person responsible for a
+request. Client-supplied headers remain labeled as untrusted observations.
+
+The network helper is not published and is the only service attached to the
+`intelligence-egress` network. The portal backend remains on the internal
+network. Provider destinations and redirects are allowlisted, responses and
+timeouts are bounded, and saved case files use mode `0600` under the protected
+Scene Management data directory.
+
+Active reconnaissance is disabled by default. Set
+`SAG_SOURCE_INTELLIGENCE_ACTIVE_ENABLED=true` only after confirming that the
+deployment's jurisdiction, hosting agreement, and network-provider acceptable
+use policy permit it. Each run requires an explicit UI confirmation, accepts
+one public IP only, rejects the protected destination and non-public ranges,
+and has a 24-hour per-IP cooldown. The immutable profile uses ordinary TCP
+connects on a short common-port list and, only when a port is open, a standards-
+compliant HTTP HEAD request, TLS handshake, SSH greeting, or SMTP greeting.
+It does not perform vulnerability tests, authentication, exploitation, path
+enumeration, UDP sweeps, stealth, evasion, adjacent-host discovery, or CIDR
+scanning.
+
+Traffic received by a system you control may be preserved and analyzed for
+defense and reporting. That does not itself grant blanket authorization to
+access or test the remote system. Treat active results as reporting evidence,
+not retaliation or attribution, and obtain qualified legal guidance for the
+deployment's jurisdiction when authorization is uncertain.
 
 ## Retention and privacy
 
@@ -208,6 +266,97 @@ categories, set an aggregation threshold and window, configure per-source
 cooldowns and a global hourly ceiling, choose UTC quiet hours with an optional
 critical override, select a redaction level, and send a labeled test alert.
 
+When WAF telemetry is configured, Scene Management also displays normalized
+CRS findings and whether ModSecurity interrupted the transaction. A response
+code taken from the ModSecurity JSON audit is explicitly labeled `WAF audit
+HTTP`; it is not treated as the final client response unless the WAF itself
+interrupted the request or a deterministic edge policy supplies the final
+result. For other non-interrupted requests, the networkless collector
+automatically joins the audit and edge access record by the exact shared
+transaction/request ID before concluding that the client received `2xx`,
+`4xx`, `429`, or `5xx`. This prevents an
+audit `200` from creating a false success signal when the edge actually
+returned a denial or not-found response. Severity comes from the matched CRS
+rule and detection confidence rather than status. Cards and Telegram alerts
+include the sanitized request, audit-status provenance, CRS IDs, safe rule
+descriptions, and a plain-English action and meaning. Raw headers, query
+values, bodies, cookies, and authorization data remain excluded. The collector
+holds a finding for a short correlation grace period before it is visible. A
+later exact-ID match is stored as a signed outcome correction and folded into
+the original card, CSV row, and API result; operators never need to compare two
+visible events. If no exact match is available after that window, the result is
+terminally labeled `unavailable`, not left `pending`. Timestamp-only guesses are
+not used. Telegram incidents are keyed by source
+fingerprint, target, and attack category. The first qualifying event alerts
+immediately, duplicates accumulate, and ongoing activity re-alerts at the
+configured persistence interval. A quiet interval closes the active incident.
+
+The deployed WAF has a deterministic exception to the correlation rule: its
+TLS default server returns HTTP 444 for an unrecognized or numeric Host before
+proxying. CRS 920350 plus a numeric target is therefore presented as a verified
+`edge_rejected` outcome with `originReached: false`; the ModSecurity audit-phase
+code remains visible as non-final evidence. This is edge host-policy
+enforcement, not a DetectionOnly CRS block. A true CRS interruption is shown
+separately as `waf_blocked`. All other non-interrupted findings are
+`outcome_unknown` only until a final access record establishes whether the
+origin proxy was reached. The final response status, audit-phase status, and
+upstream status remain separate fields.
+
+A verified final `2xx` or `3xx` is presented as the origin's response, not as
+a WAF enforcement decision. The card does not add a generic exploitation
+caveat to an otherwise normal response; it states the concrete reason the WAF
+logged the request. Recognized protocol rules include missing Host or
+User-Agent headers and policy-restricted headers or file extensions. This
+keeps ordinary automated health checks distinguishable from attack-path
+findings without treating a successful application response as suspicious by
+itself.
+
+Recognized remote-access product paths are categorized as
+`service_enumeration` and enriched with the probed family (RDP Web,
+Exchange/OWA, SonicWall, Ivanti/Pulse Secure, Windows remote management, or a
+VPN gateway). Repetition across product-identification paths is enumeration,
+not brute force, unless authentication submissions or credential attempts are
+also observed. Sensitive-file, backup-file, and framework-administration paths
+remain distinct so the later hardening review can separate edge noise from
+requests that may require application controls.
+
+Retained WAF findings are reclassified at read time with the current local
+presentation ruleset. This safely updates severity, category, path behavior,
+rule summaries, deterministic edge-policy outcomes, and correlation state
+without rewriting the signed append-only ledger. Each API event and CSV row
+identifies the presentation ruleset used. A final response is never inferred
+from a timestamp or audit-phase status; historical response fields are updated
+only by retained exact request-ID evidence. On upgrade, the collector performs
+one bounded backfill across its retained normalized findings and current edge
+correlation log. Exact matches become signed outcome corrections; records whose
+edge evidence has rotated away remain explicitly unavailable.
+
+Paginated event reads use the last event's timestamp and unique event ID as a
+keyset cursor. This prevents same-timestamp WAF imports from being skipped at a
+250-card page boundary. Filtered CSV export continues to read the complete
+matching retained ledger rather than depending on browser pagination.
+
+The ruleset includes curated descriptions for every rule observed during the
+initial DetectionOnly review, including protocol and method violations,
+command/PHP/Node.js injection, prototype-pollution, cross-site scripting, SQL
+injection, multipart validation, and application 500-response findings. Cards
+say `security rules` rather than assuming every identifier belongs to CRS,
+because ModSecurity can also emit engine-level rules such as `200003`.
+
+The public page and the authentication challenge have separate lifecycles. A
+normal `GET /` sets only the short-lived browser-binding cookie and records
+`page_served`. Click progress is transient and browser-bound. The application
+creates and records `qr_challenge_created` only after the configured sequence
+selects a destination; only then does it expose a QR and poll for approval.
+
+`Export filtered CSV` uses the selected time range and all active stream,
+severity, event, category, location, source, method, status, and disposition
+filters. It exports every matching retained event rather than only the visible
+250 rows. The CSV contains sanitized ledger data and splits final HTTP status,
+status provenance, audit-phase HTTP status, upstream HTTP status, WAF disposition, origin
+reachability, rules, and behavior into separate columns. It does not add raw
+headers, query values, cookies, request bodies, authorization data, or secrets.
+
 The event ledger remains authoritative. A notification is queued only after
 its security event has been durably appended. Delivery uses a bounded persisted
 queue, short HTTPS timeouts, bounded retries, cooldowns, and rate limits. A
@@ -216,6 +365,12 @@ recording. Delivery state—never the stored bot token—is visible in the UI. A
 `compose.telegram.yaml` to attach the backend to the optional egress network.
 Production should restrict outbound traffic to Telegram's HTTPS API using the
 deployment environment's reviewed network controls.
+
+The WAF collector itself has no outbound network and never holds Telegram
+credentials. It excludes request and response headers, query values, bodies,
+cookies, authorization data, and uploads. Reaching the hourly notification
+ceiling never removes ledger events; a later summary reports notification
+suppression.
 
 Scene Management accepts a token through a write-only password field over the
 protected administration listener. The backend verifies it with Telegram
@@ -256,6 +411,12 @@ access/error logs and consider a reviewed WAF or CrowdSec-style remediation
 layer. Introduce automatic blocking only after observing false positives;
 dashboard classifications in this project are intentionally non-blocking.
 
+Keep new WAF policies in observation mode through representative portal, QR,
+login, editor, asset, and private-service flows. Compare observations with the
+portable Nginx denials, then enable only high-confidence rules in small groups.
+The application and portable edge continue validating requests even after WAF
+enforcement is enabled.
+
 The portable public listener applies a deliberately conservative per-source
 ceiling of 10 requests per second with a burst of 40 and 20 concurrent
 connections. A production TLS proxy that replaces the portable Nginx
@@ -275,3 +436,7 @@ and appear in the access log but do not reach the application ledger.
    confirm they appear in Scene Management without sensitive payloads.
 7. Record the recovery and incident-response procedure before enabling
    automatic bans.
+8. Confirm raw queries and QR/login/challenge tokens do not appear in frontend
+   logs, and confirm a forged management-source header receives 404.
+9. Verify TLS headers, starting HSTS with a short lifetime before considering
+   `includeSubDomains` or preload.

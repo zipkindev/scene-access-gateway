@@ -41,7 +41,9 @@ Scene Management is a browser-based authoring workspace, not a collection of
 hard-coded image maps. An administrator can choose and optimize artwork,
 define TV and phone framing, place destination hotspots, require an ordered
 sequence of up to ten clicks, preview the QR position, save drafts, publish, and
-restore earlier revisions.
+restore earlier revisions. A per-scene click debugger can temporarily show
+browser-to-server click receipts for troubleshooting; it is off by default and
+does not change the hotspot sequence.
 
 ![Scene Management configuring a four-point ordered QR activation](docs/media/scene-management-sequence.png)
 
@@ -72,6 +74,23 @@ source address. MaxMind onboarding, database downloads, update status, and
 credential removal are managed from the same protected console. See
 [security monitoring](docs/security-monitoring.md).
 
+Ordinary page loads are recorded as `page_served`; they do not preallocate an
+authentication challenge. A short-lived QR challenge is created only after the
+server accepts the scene's configured destination sequence. WAF findings are
+presented through a versioned ruleset, including retained events, and distinguish
+verified final responses from historical records whose exact edge evidence is
+unavailable. A bounded upgrade backfill recovers final outcomes when both the
+retained finding and exact-ID edge record still exist.
+Security event pages use a timestamp-and-event-ID cursor so bulk imports with
+identical timestamps remain complete; filtered CSV export reads the full
+matching ledger independently of UI pagination.
+
+![Scene Management passive source intelligence with sanitized RFC-reserved evidence](docs/media/scene-management-source-intelligence.png)
+
+Selecting a source can open a passive assessment combining ledger evidence,
+local GeoIP, RDAP ownership, reverse DNS, and routing context. The unexposed
+worker has no portal-state mount and active checks remain disabled by default.
+
 ## Highlights
 
 - **Interactive portal:** zoomable and pannable scenes, motion layers,
@@ -79,7 +98,7 @@ credential removal are managed from the same protected console. See
   support, and optional scene interactions.
 - **Visual scene editor:** background and image management, framing profiles,
   hotspot placement, ordered unlock sequences, scene-specific browser titles,
-  previews, drafts, publishing, and revision history.
+  opt-in click diagnostics, previews, drafts, publishing, and revision history.
 - **Arcade continuity:** resumable local play, persistent ranked scoreboards
   across thirteen game profiles, guarded score submission, and extension-side
   Wolf/Spear competition contracts.
@@ -91,8 +110,15 @@ credential removal are managed from the same protected console. See
   composable source/location/category filters, non-blocking scanner/injection
   probe indicators, and optional redacted Telegram alerts with complete bot
   onboarding in Scene Management.
-- **Container isolation:** an Nginx gateway is the only public entrypoint; the
-  Node.js backend and identity services remain on private Compose networks.
+- **Container isolation:** the selected Nginx edge is the only public
+  entrypoint. With the WAF enabled, the origin gateway, Node.js backend, and
+  identity services remain on private Compose networks.
+- **Defense in depth:** an optional tracked OWASP CRS 4.29.0/ModSecurity 3.0.16
+  WAF can precede the hardened origin Nginx. The portable edge rejects common
+  secret-file probes, strips management trust headers, hides management
+  routes, normalizes security logs, bounds slow requests, compresses text
+  responses, and applies browser isolation headers in addition to any
+  deployment WAF.
 - **Reproducible delivery:** digest-pinned base images, exact artwork and
   optional-audio checksums, deterministic public asset archives, host tests,
   and isolated Compose smoke tests.
@@ -107,29 +133,126 @@ credential removal are managed from the same protected console. See
 
 ```mermaid
 flowchart LR
-    Visitor[Visitor browsers] -->|HTTPS 443| Gateway[Nginx public gateway]
-    Editor[Authenticated scene manager] --> Gateway
+    Visitor[Visitor browsers] -->|public HTTPS| WAF[Optional OWASP CRS WAF<br/>Nginx + ModSecurity]
+    WAF -->|private network or loopback HTTPS| Gateway[Hardened origin Nginx]
+    Editor[Authenticated scene manager] -->|private editor route| Gateway
     Gateway -->|private Compose network| Backend[Node.js portal backend]
+    WAF --> WafAudit[(Restricted WAF audit)]
+    WafAudit --> WafCollector[Networkless telemetry collector]
+    WafCollector --> Backend
     Gateway -->|only after session check| Services[Approved internal services]
     Backend --> State[(Scene, challenge, and audit state)]
     Backend --> Security[(Bounded security-event ledger)]
     Backend --> Mail[SMTP confirmation]
     Backend --> Authentik[Authentik identity API]
+    Backend -->|authenticated request| Recon[Isolated source-intelligence worker]
+    Recon -->|constrained egress| Registries[RDAP, DNS, and routing sources]
     Authentik --> Postgres[(Private PostgreSQL)]
     Security --> Editor
     Extension[Optional extensions] -. read-only mount .-> Backend
 
     classDef public fill:#dbeafe,stroke:#2563eb,color:#111827
     classDef private fill:#ecfdf5,stroke:#059669,color:#111827
-    class Visitor,Editor,Gateway public
-    class Backend,State,Security,Mail,Authentik,Postgres,Services,Extension private
+    class Visitor,WAF public
+    class Editor,Gateway,Backend,State,Security,Mail,Authentik,Postgres,Services,Extension,WafAudit,Recon private
 ```
 
-The portable default exposes only loopback development listeners. Production
-TLS, hostnames, editor authentication, and network policy belong in reviewed
-deployment configuration rather than the application image.
+The portable default exposes only loopback development listeners. The optional
+[WAF deployment component](deploy/waf/README.md) supplies the reusable image,
+templates, observation policy, and hardened Compose pattern. Production TLS,
+hostnames, editor authentication, audit storage, and network policy remain
+reviewed deployment configuration rather than image content.
+
+In the deployed topology, `access-waf` is Nginx with the ModSecurity 3.0.16
+module loaded; OWASP CRS 4.29.0 is the ruleset evaluated by that module. They
+are layers of one WAF service, not separate WAF containers. The private
+`access-proxy` remains a distinct hardened origin, while `access-portal`
+provides the application and Scene Management. Two certificate reloaders cover
+the public and origin Nginx processes. A sixth, networkless `waf-telemetry`
+service continuously reads the raw audit mount read-only and writes only
+bounded normalized findings for the portal to ingest. The seventh,
+`source-intelligence`, is an unexposed token-authenticated helper with narrow
+egress for passive RDAP, reverse-DNS, and routing evidence; active checks are
+disabled unless the operator explicitly enables and confirms them.
+
+The normalizer removes headers, bodies, query values, cookies, authorization
+data, and uploads. Transaction identifiers that do not meet the ledger's
+bounded identifier syntax are converted to stable SHA-256-derived correlation
+IDs. A first scan marks existing audit files historical: those records remain
+available for investigation but do not create Telegram notifications. Live
+requests also produce a minimal, query-free Nginx correlation record with the
+shared transaction ID, sanitized path, final client status, and upstream
+status. The networkless collector joins it to the audit before ingestion. If
+the access record arrives later, an integrity-protected outcome correction is
+folded into the original finding, so the UI, CSV, and Telegram expose one
+unified request rather than duplicate events. Live findings are also grouped
+by source, target, and category; duplicate events are
+aggregated and sustained incidents can produce bounded reminders according to
+the Scene Management policy.
+
+Finding severity is derived from the matched security-rule severity and
+high-confidence attack category, not from a response code. The presentation
+ruleset includes curated descriptions for every CRS and ModSecurity engine rule
+observed during the initial DetectionOnly review. In the UI and
+Telegram, audit status is labeled `WAF audit HTTP`. The collector waits through
+a short correlation window before exposing an unresolved record. Once joined,
+`Final HTTP` is the client response,
+`audit phase HTTP` remains separate evidence, and upstream reachability is
+explicit. A non-interrupted audit
+`2xx` does not prove that the client received a success response,
+authenticated, reached an administrative function, or exploited the
+application. The event model reports detection, enforcement, and origin
+reachability separately. A WAF interruption is recorded as `WAF blocked`; the
+numeric-Host default-server contract is recorded as `Edge HTTP 444`, `edge
+policy rejected`, and `origin not reached`; other DetectionOnly findings remain
+`final outcome unverified` with correlation marked `unavailable` when exact
+edge evidence cannot be found. They are not left indefinitely pending. The
+audit-phase status is retained separately for diagnosis. Normalized findings include a safe CRS rule
+explanation plus the sanitized method, path, result provenance, action, and WAF
+mode without retaining request headers, query values, or bodies.
+Verified final `2xx`/`3xx` findings describe the origin result and the exact
+matched rule (for example, a missing User-Agent header); they do not add a
+generic statement about exploitation to a normal response.
+
+Path-aware presentation distinguishes remote-service enumeration from generic
+protocol anomalies. Recognized Microsoft RDP Web, Exchange/OWA, SonicWall,
+Ivanti/Pulse Secure, Windows remote-management, and VPN-gateway probes are
+grouped as `service_enumeration`; credential/configuration files, backup files,
+and framework administration endpoints keep their own categories and severity.
+This classification describes attacker behavior, not proof that the named
+product exists on the origin.
+
+Scene Management can export the current Security Monitoring view as CSV. The
+export uses the active time range and every active filter and includes only
+sanitized ledger fields. Separate columns identify the final/status-source
+result, audit-phase status, enforcement disposition, CRS rules, behavior
+summary, and whether the origin was reached. Spreadsheet formula prefixes are
+neutralized on export.
+
+Start an internet-facing rollout with `MODSEC_RULE_ENGINE=DetectionOnly` and
+retain application/origin enforcement. Use a one-week observation window to
+compare WAF findings with origin outcomes, rate limits, and known legitimate
+flows. Enable high-confidence CRS protections incrementally only after that
+review; the mode remains deployment-controlled rather than changeable from the
+browser.
+
+Deployments that serve additional public names declare them explicitly with
+`SAG_PUBLIC_HOST_ALIASES`; for example, the arcade hostname can share the
+portal without becoming a wildcard trust rule. The backend accepts only the
+canonical hostname and configured aliases on the canonical origin port or the
+default external TLS port. WAF and origin Nginx allowlists must contain the
+same names, while unknown hosts, arbitrary ports, credentials, and path-shaped
+Host values continue to fail closed.
 
 More detail is available in the [architecture notes](docs/architecture/README.md).
+
+Every protected application is declared in
+[`deploy/applications.json`](deploy/applications.json). The contract makes its
+route/host mode, private origin variables, Authentik and QR behavior, proxy
+rules, external CSP sources, WAF policy, exception rationale, and acceptance
+journeys reviewable together. `scripts/check-application-contracts.js` fails
+closed on wildcard or undocumented exceptions and runs as part of the normal
+test gate.
 
 The public Platform repository pins a tested Gateway commit together with a
 tested optional Wolf extension commit. It does not copy this repository's
@@ -312,6 +435,13 @@ See the [deployment guide](docs/deployment/README.md).
 - Probe classifications are investigation signals, not claims that an exploit
   succeeded. Edge access logs, Authentik events, and a reviewed WAF or
   remediation layer remain separate controls.
+- Public ingress must not route `/internal/torrentharbor-management/`. Trusted
+  management callers connect over the private network and are checked against
+  their TCP peer address; internet-supplied identity or source headers are not
+  authorization.
+- Frontend logs contain normalized routes rather than raw query strings or
+  one-time tokens. Versioned scripts receive immutable caching, while Nginx
+  compresses eligible text responses and enforces connection/body timeouts.
 
 Please read [SECURITY.md](SECURITY.md) before reporting a vulnerability or
 deploying the gateway publicly.

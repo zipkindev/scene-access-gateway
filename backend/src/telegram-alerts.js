@@ -6,18 +6,23 @@ const path = require('node:path');
 
 const LEVELS = ['info', 'warning', 'critical'];
 const CATEGORIES = new Set([
-  'sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
+  'sql_injection_probe', 'command_injection_probe', 'cross_site_scripting_probe', 'path_traversal_probe',
   'automated_scanner_probe', 'unexpected_http_method', 'invalid_content_length',
+  'sensitive_file_enumeration', 'backup_file_probe', 'framework_admin_probe',
+  'known_scanner', 'service_enumeration', 'application_error_exposure', 'protocol_anomaly',
   'rate_limiting', 'integrity_failure',
 ]);
 const DEFAULT_POLICY = Object.freeze({
-  version: 1,
+  version: 3,
   enabled: false,
   minimumSeverity: 'critical',
-  categories: ['sql_injection_probe', 'command_injection_probe', 'path_traversal_probe', 'integrity_failure'],
+  categories: ['sql_injection_probe', 'command_injection_probe', 'cross_site_scripting_probe', 'path_traversal_probe',
+    'sensitive_file_enumeration', 'backup_file_probe', 'known_scanner', 'integrity_failure'],
   countThreshold: 1,
   aggregationWindowSeconds: 60,
   cooldownSeconds: 300,
+  persistentReminderSeconds: 900,
+  incidentQuietSeconds: 1800,
   globalLimitPerHour: 20,
   quietHours: null,
   criticalOverride: true,
@@ -67,7 +72,20 @@ function validatePolicy(value) {
   if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error('Invalid Telegram policy');
   const allowed = new Set(Object.keys(DEFAULT_POLICY));
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('Invalid Telegram policy');
-  const policy = { ...DEFAULT_POLICY, ...value, version: 1 };
+  const categories = Array.isArray(value.categories) ? [...value.categories] : value.categories;
+  if (value.version === 1 && Array.isArray(categories)) {
+    if (categories.includes('automated_scanner_probe')) categories.push(
+      'sensitive_file_enumeration', 'backup_file_probe', 'framework_admin_probe', 'known_scanner');
+    if (categories.includes('unexpected_http_method') || categories.includes('invalid_content_length')) {
+      categories.push('protocol_anomaly');
+    }
+  }
+  if (value.version <= 2 && Array.isArray(categories)
+    && (categories.includes('automated_scanner_probe') || categories.includes('known_scanner'))) {
+    categories.push('service_enumeration');
+  }
+  const policy = { ...DEFAULT_POLICY, ...value, categories, version: 3 };
+  if (Array.isArray(policy.categories)) policy.categories = [...new Set(policy.categories)];
   if (typeof policy.enabled !== 'boolean' || !LEVELS.includes(policy.minimumSeverity)
     || !Array.isArray(policy.categories) || policy.categories.length > CATEGORIES.size
     || policy.categories.some((item) => !CATEGORIES.has(item))
@@ -75,6 +93,8 @@ function validatePolicy(value) {
     || !Number.isInteger(policy.countThreshold) || policy.countThreshold < 1 || policy.countThreshold > 100
     || !Number.isInteger(policy.aggregationWindowSeconds) || policy.aggregationWindowSeconds < 10 || policy.aggregationWindowSeconds > 3600
     || !Number.isInteger(policy.cooldownSeconds) || policy.cooldownSeconds < 0 || policy.cooldownSeconds > 86400
+    || !Number.isInteger(policy.persistentReminderSeconds) || policy.persistentReminderSeconds < 60 || policy.persistentReminderSeconds > 86400
+    || !Number.isInteger(policy.incidentQuietSeconds) || policy.incidentQuietSeconds < 60 || policy.incidentQuietSeconds > 604800
     || !Number.isInteger(policy.globalLimitPerHour) || policy.globalLimitPerHour < 1 || policy.globalLimitPerHour > 100
     || typeof policy.criticalOverride !== 'boolean' || !['masked', 'country-only'].includes(policy.redaction)) {
     throw new Error('Invalid Telegram policy');
@@ -105,6 +125,52 @@ function maskedSource(source, redaction) {
   return [masked, location, network].filter(Boolean).join(' · ');
 }
 
+function dispositionLabel(disposition) {
+  return ({
+    observed_passed: 'verified final 2xx/3xx',
+    origin_rejected: 'verified final 4xx',
+    origin_rate_limited: 'verified final 429',
+    origin_error: 'verified final 5xx',
+    waf_blocked: 'WAF blocked',
+    edge_rejected: 'edge host policy rejected',
+    outcome_unknown: 'final outcome unverified',
+  })[disposition] || String(disposition).replaceAll('_', ' ');
+}
+
+function wafAction(event) {
+  const disposition = event.edge?.disposition;
+  if (disposition === 'observed_passed') return event.edge?.statusVerified
+    ? 'Origin returned a final 2xx/3xx response'
+    : event.edge?.mode === 'DetectionOnly' ? 'Observed only (DetectionOnly); WAF did not interrupt the request'
+      : 'Observed only; WAF did not interrupt the request';
+  if (disposition === 'origin_rejected') return event.edge?.statusVerified
+    ? 'Origin returned a final 4xx response' : 'WAF audit reported a 4xx; final edge status is unverified';
+  if (disposition === 'origin_rate_limited') return event.edge?.statusVerified
+    ? 'Origin returned a final HTTP 429 response' : 'WAF audit reported 429; final edge status is unverified';
+  if (disposition === 'origin_error') return event.edge?.statusVerified
+    ? 'Origin returned a final 5xx response' : 'WAF audit reported 5xx; final edge status is unverified';
+  if (disposition === 'waf_blocked') return 'Blocked by WAF before reaching the origin';
+  if (disposition === 'edge_rejected') return 'Rejected by edge host policy before proxying to the application';
+  return 'WAF observed the request; final edge and application outcome is unverified';
+}
+
+function wafMeaning(event) {
+  const disposition = event.edge?.disposition;
+  if (event.edge?.statusVerified !== true) {
+    if (event.edge?.correlationStatus === 'pending') return 'Automatic edge correlation is pending.';
+    return event.http?.status !== null
+      ? `ModSecurity audit reported HTTP ${event.http.status}; exact final-response evidence is unavailable.`
+      : 'Exact final-response evidence is unavailable.';
+  }
+  if (disposition === 'observed_passed') return null;
+  if (disposition === 'origin_rejected') return 'The application or origin rejected the request.';
+  if (disposition === 'origin_rate_limited') return 'The application or origin applied rate limiting.';
+  if (disposition === 'origin_error') return 'The application or origin returned a server error.';
+  if (disposition === 'waf_blocked') return 'The request did not reach the application origin.';
+  if (disposition === 'edge_rejected') return 'The edge returned HTTP 444 without proxying; the application was not reached.';
+  return null;
+}
+
 class TelegramAlerts {
   constructor(directory, options = {}) {
     this.directory = path.join(directory, 'scene-management');
@@ -128,6 +194,8 @@ class TelegramAlerts {
     this.cooldowns = new Map(Object.entries(this.delivery.cooldowns || {}).filter(([, until]) => Number.isFinite(until)));
     this.sent = Array.isArray(this.delivery.recentDeliveries)
       ? this.delivery.recentDeliveries.filter((at) => Number.isFinite(at) && this.now().getTime() - at < 3600000) : [];
+    this.incidents = new Map(Object.entries(this.delivery.activeIncidents || {})
+      .filter(([, value]) => value && Number.isFinite(value.lastSeenAt)));
     this.draining = null;
     if (this.queue.length && this.policy.enabled && this.configured()) this._schedule();
   }
@@ -151,6 +219,7 @@ class TelegramAlerts {
   }
 
   state() {
+    const activeIncidents = this._activeIncidents();
     return {
       configured: this.configured(), active: this.configured() && this.policy.enabled,
       setup: {
@@ -162,6 +231,14 @@ class TelegramAlerts {
           type: this.integration.chat.type } : null,
       },
       policy: structuredClone(this.policy), pending: this.queue.length,
+      incidents: { active: activeIncidents.length,
+        suppressedByHourlyLimit: Number(this.delivery.suppressedByHourlyLimit || 0),
+        items: activeIncidents.sort((left, right) => right.lastSeenAt - left.lastSeenAt).slice(0, 50)
+          .map((incident) => ({ category: incident.category, target: incident.target,
+            source: incident.source, firstSeenAt: new Date(incident.startedAt).toISOString(),
+            lastSeenAt: new Date(incident.lastSeenAt).toISOString(), count: incident.count,
+            sinceAlert: incident.sinceAlert, dispositions: { ...incident.dispositions } })),
+      },
       delivery: { lastSuccessAt: this.delivery.lastSuccessAt || null,
         lastFailureAt: this.delivery.lastFailureAt || null,
         lastFailureCode: this.delivery.lastFailureCode || null,
@@ -197,6 +274,7 @@ class TelegramAlerts {
     atomicJson(this.metadataFile, this.integration);
     if (this.policy.enabled) this.updatePolicy({ ...this.policy, enabled: false });
     this.queue = [];
+    this.incidents.clear();
     this._saveQueue();
     return this.state();
   }
@@ -242,6 +320,7 @@ class TelegramAlerts {
     this.integration = { bot: null, chat: null };
     if (this.policy.enabled) this.updatePolicy({ ...this.policy, enabled: false });
     this.queue = [];
+    this.incidents.clear();
     this._saveQueue();
     return this.state();
   }
@@ -254,6 +333,7 @@ class TelegramAlerts {
   }
 
   enqueue(event) {
+    if (event.edge?.historical) return false;
     const credentials = this._credentials();
     const category = eventCategory(event);
     if (!credentials || !this.policy.enabled || !category || !this.policy.categories.includes(category)) return false;
@@ -261,32 +341,87 @@ class TelegramAlerts {
     const now = this.now();
     if (quiet(this.policy, now) && !(event.severity === 'critical' && this.policy.criticalOverride)) return false;
     const fingerprint = crypto.createHash('sha256').update(String(event.source?.ip || 'unknown')).digest('hex').slice(0, 12);
-    const key = `${category}:${fingerprint}`;
-    const current = this.aggregates.get(key);
-    const windowMs = this.policy.aggregationWindowSeconds * 1000;
-    const aggregate = current && now.getTime() - current.startedAt < windowMs
-      ? current : { startedAt: now.getTime(), count: 0, event };
-    aggregate.count += 1;
-    aggregate.event = event;
-    this.aggregates.set(key, aggregate);
-    if (aggregate.count < this.policy.countThreshold) return false;
-    if ((this.cooldowns.get(key) || 0) > now.getTime()) return false;
+    const target = String(event.edge?.target || event.destination || 'portal').slice(0, 253);
+    const key = `${category}:${fingerprint}:${target}`;
+    const prior = this.incidents.get(key);
+    const expired = !prior || now.getTime() - prior.lastSeenAt >= this.policy.incidentQuietSeconds * 1000;
+    const incident = expired ? { startedAt: now.getTime(), lastSeenAt: now.getTime(), windowStartedAt: now.getTime(),
+      thresholdCount: 0, count: 0,
+      sinceAlert: 0, lastAlertAt: 0, highestSeverity: 'info', target, category,
+      source: maskedSource(event.source, this.policy.redaction), dispositions: {} } : prior;
+    if (!Number.isFinite(incident.windowStartedAt)
+      || now.getTime() - incident.windowStartedAt >= this.policy.aggregationWindowSeconds * 1000) {
+      incident.windowStartedAt = now.getTime();
+      incident.thresholdCount = 0;
+    }
+    incident.thresholdCount = Number(incident.thresholdCount || 0) + 1;
+    const escalated = LEVELS.indexOf(event.severity) > LEVELS.indexOf(incident.highestSeverity);
+    incident.count += 1;
+    incident.sinceAlert += 1;
+    incident.lastSeenAt = now.getTime();
+    if (LEVELS.indexOf(event.severity) > LEVELS.indexOf(incident.highestSeverity)) incident.highestSeverity = event.severity;
+    const disposition = String(event.edge?.disposition || event.outcome || 'observed').slice(0, 80);
+    incident.dispositions[disposition] = (incident.dispositions[disposition] || 0) + 1;
+    this.incidents.set(key, incident);
+    this._saveStatus();
+    if (!incident.lastAlertAt && incident.thresholdCount < this.policy.countThreshold) return false;
+    const repeatMs = Math.max(this.policy.cooldownSeconds, this.policy.persistentReminderSeconds) * 1000;
+    if (incident.lastAlertAt && !escalated && now.getTime() - incident.lastAlertAt < repeatMs) return false;
     this.sent = this.sent.filter((at) => now.getTime() - at < 3600000);
-    if (this.sent.length >= this.policy.globalLimitPerHour) return false;
-    this.aggregates.delete(key);
-    this.cooldowns.set(key, now.getTime() + this.policy.cooldownSeconds * 1000);
+    let pendingDeliveries = this.queue.filter((item) => !item.test).length;
+    if (this.delivery.suppressedByHourlyLimit && this.sent.length + pendingDeliveries < this.policy.globalLimitPerHour) {
+      this.queue.push({ id: crypto.randomUUID(), text: [
+        'Scene Access security alert summary',
+        `${this.delivery.suppressedByHourlyLimit} incident notification(s) were suppressed by the hourly ceiling.`,
+        'All underlying security events remain available in Scene Management.',
+        `Time: ${now.toISOString()}`,
+      ].join('\n'), createdAt: now.toISOString(), test: false });
+      this.delivery.suppressedByHourlyLimit = 0;
+      pendingDeliveries += 1;
+      this._saveQueue();
+      this._schedule();
+    }
+    if (this.sent.length + pendingDeliveries >= this.policy.globalLimitPerHour) {
+      this.delivery.suppressedByHourlyLimit = Number(this.delivery.suppressedByHourlyLimit || 0) + 1;
+      incident.lastAlertAt = now.getTime();
+      this._saveStatus();
+      return false;
+    }
     const source = maskedSource(event.source, this.policy.redaction);
+    const dispositionSummary = Object.entries(incident.dispositions)
+      .map(([name, count]) => `${dispositionLabel(name)} ${count}`).join(' · ');
+    const waf = event.type === 'waf_finding' && event.edge;
+    const request = waf && event.http?.path
+      ? `Request: ${String(event.http.method || '').slice(0, 12)} ${String(event.http.path).slice(0, 512)}`
+        + (event.http.status !== null ? (event.http.statusSource === 'edge_policy'
+          ? ` → Edge HTTP ${event.http.status}` : event.http.statusSource === 'edge_access'
+            ? ` → Final HTTP ${event.http.status}` : event.edge.statusVerified === true
+              ? ` → HTTP ${event.http.status}` : ` → WAF audit HTTP ${event.http.status}`) : '') : null;
+    const auditPhase = waf && Number.isInteger(event.http?.auditStatus)
+      ? `Audit phase: HTTP ${event.http.auditStatus} (not the final client response)` : null;
+    const matched = waf && event.edge.ruleIds?.length
+      ? `Matched security rules: ${event.edge.ruleIds.join(', ')}`
+        + (event.edge.ruleSummary ? ` · ${event.edge.ruleSummary}` : '') : null;
     const text = [
       'Scene Access security alert',
       `${String(event.severity || 'warning').toUpperCase()} · ${category.replaceAll('_', ' ')}`,
-      `Observed: ${aggregate.count}`,
+      `Observed since last alert: ${incident.sinceAlert} · total: ${incident.count}`,
       `Time: ${event.at || now.toISOString()}`,
       `Source: ${source}`,
-      event.outcome ? `Outcome: ${String(event.outcome).slice(0, 80)}` : null,
+      `Target: ${target}`,
+      request,
+      auditPhase,
+      matched,
+      waf && event.edge.behaviorSummary ? `Behavior: ${event.edge.behaviorSummary}` : null,
+      waf ? `WAF action: ${wafAction(event)}` : dispositionSummary ? `Results: ${dispositionSummary}` : null,
+      waf ? `Incident results: ${dispositionSummary}` : null,
+      waf ? `Meaning: ${wafMeaning(event)}` : event.outcome ? `Outcome: ${String(event.outcome).slice(0, 80)}` : null,
     ].filter(Boolean).join('\n').slice(0, 3500);
     this.queue.push({ id: crypto.randomUUID(), text, createdAt: now.toISOString(), test: false });
     if (this.queue.length > 100) this.queue.splice(0, this.queue.length - 100);
     this._saveQueue();
+    incident.lastAlertAt = now.getTime();
+    incident.sinceAlert = 0;
     this._saveStatus();
     this._schedule();
     return true;
@@ -306,11 +441,18 @@ class TelegramAlerts {
   }
 
   _saveQueue() { atomicJson(this.queueFile, this.queue); }
+  _activeIncidents() {
+    const cutoff = this.now().getTime() - this.policy.incidentQuietSeconds * 1000;
+    for (const [key, incident] of this.incidents) if (incident.lastSeenAt < cutoff) this.incidents.delete(key);
+    return [...this.incidents.values()];
+  }
   _saveStatus() {
     const now = this.now().getTime();
     this.sent = this.sent.filter((at) => now - at < 3600000);
     for (const [key, until] of this.cooldowns) if (until <= now) this.cooldowns.delete(key);
+    this._activeIncidents();
     atomicJson(this.statusFile, { ...this.delivery, recentDeliveries: this.sent,
+      activeIncidents: Object.fromEntries(this.incidents),
       cooldowns: Object.fromEntries(this.cooldowns) });
   }
 
