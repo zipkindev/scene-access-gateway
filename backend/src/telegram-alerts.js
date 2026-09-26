@@ -126,9 +126,10 @@ function maskedSource(source, redaction) {
 
 function dispositionLabel(disposition) {
   return ({
-    observed_passed: 'audit-reported 2xx/3xx',
-    origin_rejected: 'audit-reported 4xx',
-    origin_rate_limited: 'audit-reported 429',
+    observed_passed: 'verified final 2xx/3xx',
+    origin_rejected: 'verified final 4xx',
+    origin_rate_limited: 'verified final 429',
+    origin_error: 'verified final 5xx',
     waf_blocked: 'WAF blocked',
     edge_rejected: 'edge host policy rejected',
     outcome_unknown: 'final outcome unverified',
@@ -137,13 +138,16 @@ function dispositionLabel(disposition) {
 
 function wafAction(event) {
   const disposition = event.edge?.disposition;
-  if (disposition === 'observed_passed') return event.edge?.mode === 'DetectionOnly'
-    ? 'Observed only (DetectionOnly); WAF did not interrupt the request'
-    : 'Observed only; WAF did not interrupt the request';
+  if (disposition === 'observed_passed') return event.edge?.statusVerified
+    ? 'WAF allowed the request; the final client response is verified'
+    : event.edge?.mode === 'DetectionOnly' ? 'Observed only (DetectionOnly); WAF did not interrupt the request'
+      : 'Observed only; WAF did not interrupt the request';
   if (disposition === 'origin_rejected') return event.edge?.statusVerified
-    ? 'Rejected before reaching the origin' : 'WAF audit reported a 4xx; final edge status is unverified';
+    ? 'Origin returned a final 4xx response' : 'WAF audit reported a 4xx; final edge status is unverified';
   if (disposition === 'origin_rate_limited') return event.edge?.statusVerified
-    ? 'Rate-limited before reaching the origin' : 'WAF audit reported 429; final edge status is unverified';
+    ? 'Origin returned a final HTTP 429 response' : 'WAF audit reported 429; final edge status is unverified';
+  if (disposition === 'origin_error') return event.edge?.statusVerified
+    ? 'Origin returned a final 5xx response' : 'WAF audit reported 5xx; final edge status is unverified';
   if (disposition === 'waf_blocked') return 'Blocked by WAF before reaching the origin';
   if (disposition === 'edge_rejected') return 'Rejected by edge host policy before proxying to the application';
   return 'WAF observed the request; final edge and application outcome is unverified';
@@ -152,11 +156,12 @@ function wafAction(event) {
 function wafMeaning(event) {
   const disposition = event.edge?.disposition;
   if (event.edge?.statusVerified !== true) return event.http?.status !== null
-    ? `ModSecurity audit reported HTTP ${event.http.status}; correlate the edge access log to determine the final client response.`
-    : 'Correlate the edge access log to determine the final client response.';
+    ? `ModSecurity audit reported HTTP ${event.http.status}; automatic edge correlation is pending.`
+    : 'Automatic edge correlation is pending.';
   if (disposition === 'observed_passed') return 'The request was not blocked; that alone does not prove access or exploitation.';
   if (disposition === 'origin_rejected') return 'The application or origin rejected the request.';
   if (disposition === 'origin_rate_limited') return 'The application or origin applied rate limiting.';
+  if (disposition === 'origin_error') return 'The application or origin returned a server error.';
   if (disposition === 'waf_blocked') return 'The request did not reach the application origin.';
   if (disposition === 'edge_rejected') return 'The edge returned HTTP 444 without proxying; the application was not reached.';
   return null;
@@ -385,8 +390,9 @@ class TelegramAlerts {
     const request = waf && event.http?.path
       ? `Request: ${String(event.http.method || '').slice(0, 12)} ${String(event.http.path).slice(0, 512)}`
         + (event.http.status !== null ? (event.http.statusSource === 'edge_policy'
-          ? ` → Edge HTTP ${event.http.status}` : event.edge.statusVerified === true
-            ? ` → HTTP ${event.http.status}` : ` → WAF audit HTTP ${event.http.status}`) : '') : null;
+          ? ` → Edge HTTP ${event.http.status}` : event.http.statusSource === 'edge_access'
+            ? ` → Final HTTP ${event.http.status}` : event.edge.statusVerified === true
+              ? ` → HTTP ${event.http.status}` : ` → WAF audit HTTP ${event.http.status}`) : '') : null;
     const auditPhase = waf && Number.isInteger(event.http?.auditStatus)
       ? `Audit phase: HTTP ${event.http.auditStatus} (not the final client response)` : null;
     const matched = waf && event.edge.ruleIds?.length

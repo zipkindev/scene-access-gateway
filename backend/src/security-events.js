@@ -4,13 +4,13 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
-const { presentWafEvent } = require('./waf-rules');
+const { applyWafOutcome, presentWafEvent } = require('./waf-rules');
 
 const LEVELS = new Set(['info', 'warning', 'critical']);
 const TYPES = new Set([
   'portal_visit', 'qr_login_page_opened', 'qr_login_attempt', 'qr_email_delivery',
   'qr_verified', 'portal_session_created', 'access_request', 'rate_limited',
-  'request_rejected', 'suspicious_request', 'waf_finding', 'admin_action',
+  'request_rejected', 'suspicious_request', 'waf_finding', 'waf_outcome', 'admin_action',
 ]);
 const CATEGORIES = new Set([
   'sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
@@ -26,6 +26,7 @@ const SENSITIVE = /(?:^|\/)(?:\.env(?:[._~-][^/]*)?|\.git(?:-credentials|-askpas
 const BACKUP = /(?:^|\/)[^/]{1,180}(?:\.bak|\.backup|\.old|\.orig|\.save|\.swp|~)(?:\/|$)/i;
 const FRAMEWORK = /(?:^|\/)(?:wp-admin|wp-login\.php|phpmyadmin|server-status|actuator|vendor\/phpunit|_profiler\/phpinfo(?:\.php)?)(?:\/|$)/i;
 const REQUEST_ID = /^[0-9a-f-]{36}$/;
+const EDGE_REQUEST_ID = /^(?:[0-9a-f]{32}|[0-9a-f-]{36})$/i;
 
 function selectedText(value, label, expression, maximumLength) {
   const requested = Array.isArray(value) ? value : value ? [value] : [];
@@ -95,6 +96,7 @@ function effectiveCategory(event) {
 class SecurityEvents {
   constructor(directory, geoip, options = {}) {
     this.directory = path.join(directory, 'security-events');
+    this.outcomesDirectory = path.join(this.directory, 'waf-outcomes');
     this.keyFile = path.join(this.directory, '.integrity-key');
     this.geoip = geoip;
     this.retentionDays = Number.isInteger(options.retentionDays) ? options.retentionDays
@@ -103,6 +105,7 @@ class SecurityEvents {
       : Math.min(1024 * 1024 * 1024, Math.max(1024 * 1024,
         Number.parseInt(process.env.SECURITY_EVENT_MAX_BYTES || String(64 * 1024 * 1024), 10) || 64 * 1024 * 1024));
     fs.mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(this.outcomesDirectory, { recursive: true, mode: 0o700 });
     if (!fs.existsSync(this.keyFile)) fs.writeFileSync(this.keyFile, crypto.randomBytes(32), { mode: 0o600, flag: 'wx' });
     this.key = fs.readFileSync(this.keyFile);
     if (this.key.length !== 32) throw new Error('Invalid security-event integrity key');
@@ -120,6 +123,7 @@ class SecurityEvents {
     this.writeQueue = [];
     this.writing = false;
     this.flushWaiters = [];
+    this.outcomeCache = null;
     this.cleanup();
   }
 
@@ -127,19 +131,29 @@ class SecurityEvents {
     return fs.readdirSync(this.directory).filter((name) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(name)).sort();
   }
 
+  _outcomeFiles() {
+    return fs.readdirSync(this.outcomesDirectory)
+      .filter((name) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(name)).sort();
+  }
+
   cleanup(now = Date.now()) {
     if (now - this.lastCleanup < 60 * 60 * 1000) return;
+    this.outcomeCache = null;
     const cutoff = now - this.retentionDays * 24 * 60 * 60 * 1000;
-    for (const name of this._files()) {
+    for (const [directory, names] of [[this.directory, this._files()],
+      [this.outcomesDirectory, this._outcomeFiles()]]) for (const name of names) {
       const date = Date.parse(name.slice(0, 10) + 'T00:00:00.000Z');
-      if (Number.isFinite(date) && date < cutoff) fs.unlinkSync(path.join(this.directory, name));
+      if (Number.isFinite(date) && date < cutoff) fs.unlinkSync(path.join(directory, name));
     }
-    const remaining = this._files();
-    this.totalBytes = remaining.reduce((total, name) => total + fs.statSync(path.join(this.directory, name)).size, 0);
-    while (this.totalBytes > this.maxBytes * 0.9 && remaining.length > 1) {
+    const remaining = [
+      ...this._files().map((name) => ({ name, file: path.join(this.directory, name) })),
+      ...this._outcomeFiles().map((name) => ({ name, file: path.join(this.outcomesDirectory, name) })),
+    ].sort((a, b) => a.name.localeCompare(b.name) || a.file.localeCompare(b.file));
+    this.totalBytes = remaining.reduce((total, item) => total + fs.statSync(item.file).size, 0);
+    while (this.totalBytes > this.maxBytes * 0.9 && remaining.length > 2) {
       const oldest = remaining.shift();
-      this.totalBytes -= fs.statSync(path.join(this.directory, oldest)).size;
-      fs.unlinkSync(path.join(this.directory, oldest));
+      this.totalBytes -= fs.statSync(oldest.file).size;
+      fs.unlinkSync(oldest.file);
     }
     this.storageLimited = this.totalBytes >= this.maxBytes;
     this.lastCleanup = now;
@@ -152,6 +166,14 @@ class SecurityEvents {
     console.log(JSON.stringify({ event: 'security_event', id: event.id, type: event.type,
       severity: event.severity, outcome: event.outcome, category: event.category }));
     this.cleanup();
+    if (event.type === 'waf_outcome') {
+      if (this.outcomeCache && event.edge?.transactionId) {
+        const correction = { ...event, integrityValid: true };
+        delete correction.integrity;
+        this.outcomeCache.set(event.edge.transactionId, correction);
+      }
+      return;
+    }
     for (const listener of this.listeners) {
       try { listener({ ...event, integrityValid: true }); } catch (_) { /* alert delivery is isolated */ }
     }
@@ -206,10 +228,12 @@ class SecurityEvents {
       this.suppressed += 1;
       return null;
     }
-    const suppliedAt = type === 'waf_finding' && Number.isFinite(Date.parse(data.at || '')) ? Date.parse(data.at) : NaN;
+    const suppliedAt = ['waf_finding', 'waf_outcome'].includes(type)
+      && Number.isFinite(Date.parse(data.at || '')) ? Date.parse(data.at) : NaN;
     const at = Number.isFinite(suppliedAt) && suppliedAt <= Date.now() + 5 * 60 * 1000
       ? new Date(suppliedAt).toISOString() : new Date().toISOString();
-    const suppliedHttp = type === 'waf_finding' && data.http && typeof data.http === 'object' ? data.http : null;
+    const suppliedHttp = ['waf_finding', 'waf_outcome'].includes(type)
+      && data.http && typeof data.http === 'object' ? data.http : null;
     const event = {
       version: 1, id: crypto.randomUUID(), at, type, severity,
       outcome: typeof data.outcome === 'string' ? data.outcome.slice(0, 80) : null,
@@ -225,18 +249,21 @@ class SecurityEvents {
         method: String(suppliedHttp.method || '').slice(0, 12),
         path: safePath(String(suppliedHttp.path || '/').split('?')[0]),
         status: Number.isInteger(suppliedHttp.status) ? suppliedHttp.status : null,
-        statusSource: ['modsecurity_audit', 'edge_policy'].includes(suppliedHttp.statusSource)
+        statusSource: ['modsecurity_audit', 'edge_policy', 'edge_access'].includes(suppliedHttp.statusSource)
           ? suppliedHttp.statusSource : null,
         auditStatus: Number.isInteger(suppliedHttp.auditStatus) ? suppliedHttp.auditStatus : null,
+        upstreamStatus: Number.isInteger(suppliedHttp.upstreamStatus) ? suppliedHttp.upstreamStatus : null,
         agentHash: null,
       } : null,
       identityHash: data.identity ? this._hash(String(data.identity).trim().toLowerCase()) : null,
-      requestId: REQUEST_ID.test(data.requestId || '') ? data.requestId : null,
+      requestId: (type === 'waf_finding' || type === 'waf_outcome' ? EDGE_REQUEST_ID : REQUEST_ID)
+        .test(data.requestId || '') ? data.requestId : null,
       category: typeof data.category === 'string' ? data.category.slice(0, 80) : null,
       edge: data.edge && typeof data.edge === 'object' ? {
         target: /^[A-Za-z0-9.-]{1,253}$/.test(data.edge.target || '') ? data.edge.target.toLowerCase() : null,
         disposition: ['observed_passed', 'origin_rejected', 'origin_rate_limited', 'waf_blocked',
-          'edge_rejected', 'outcome_unknown'].includes(data.edge.disposition) ? data.edge.disposition : 'outcome_unknown',
+          'edge_rejected', 'origin_error', 'outcome_unknown'].includes(data.edge.disposition)
+          ? data.edge.disposition : 'outcome_unknown',
         ruleIds: Array.isArray(data.edge.ruleIds) ? [...new Set(data.edge.ruleIds.filter((value) => /^\d{1,10}$/.test(String(value))).map(String))].slice(0, 32) : [],
         ruleSummary: typeof data.edge.ruleSummary === 'string'
           ? data.edge.ruleSummary.slice(0, 240).replace(/[\r\n]/g, '') : null,
@@ -262,7 +289,8 @@ class SecurityEvents {
       this.suppressed += 1;
       return null;
     }
-    const file = path.join(this.directory, at.slice(0, 10) + '.jsonl');
+    const file = path.join(type === 'waf_outcome' ? this.outcomesDirectory : this.directory,
+      at.slice(0, 10) + '.jsonl');
     if (this.asyncWrites) {
       this.pendingBytes += bytes;
       this.writeQueue.push({ file, line, bytes, event });
@@ -313,6 +341,7 @@ class SecurityEvents {
     const requestedBefore = options.before;
     if (requestedBefore && !Number.isFinite(Date.parse(requestedBefore))) throw new Error('Invalid event cursor');
     const before = requestedBefore ? Date.parse(requestedBefore) : Infinity;
+    const outcomes = this._wafOutcomes();
     for (const name of this._files().reverse()) {
       const lines = fs.readFileSync(path.join(this.directory, name), 'utf8').trim().split('\n').filter(Boolean).reverse();
       for (const line of lines) {
@@ -327,6 +356,10 @@ class SecurityEvents {
         const expected = Buffer.from(this._hash(JSON.stringify(canonical)));
         event.integrityValid = supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
         delete event.integrity;
+        if (event.type === 'waf_outcome') continue;
+        if (event.type === 'waf_finding' && event.edge?.transactionId) {
+          applyWafOutcome(event, outcomes.get(event.edge.transactionId));
+        }
         presentWafEvent(event);
         if (event.source?.scope === 'public' && (!event.source.country
           || !Number.isFinite(event.source.latitude) || !Number.isFinite(event.source.longitude))) {
@@ -351,6 +384,28 @@ class SecurityEvents {
         yield event;
       }
     }
+  }
+
+  _wafOutcomes() {
+    if (this.outcomeCache) return this.outcomeCache;
+    const outcomes = new Map();
+    for (const name of this._outcomeFiles()) {
+      for (const line of fs.readFileSync(path.join(this.outcomesDirectory, name), 'utf8').split('\n').filter(Boolean)) {
+        let event;
+        try { event = JSON.parse(line); } catch (_) { continue; }
+        if (event.type !== 'waf_outcome' || !event.edge?.transactionId) continue;
+        const integrity = event.integrity;
+        const canonical = { ...event };
+        delete canonical.integrity;
+        const supplied = Buffer.from(typeof integrity === 'string' ? integrity : '');
+        const expected = Buffer.from(this._hash(JSON.stringify(canonical)));
+        event.integrityValid = supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+        delete event.integrity;
+        if (event.integrityValid) outcomes.set(event.edge.transactionId, event);
+      }
+    }
+    this.outcomeCache = outcomes;
+    return this.outcomeCache;
   }
 
   list(options = {}) {
@@ -453,7 +508,7 @@ class SecurityEvents {
       waf: {
         total: count((event) => event.type === 'waf_finding'),
         passed: count((event) => event.edge?.disposition === 'observed_passed'),
-        rejected: count((event) => ['origin_rejected', 'edge_rejected'].includes(event.edge?.disposition)),
+        rejected: count((event) => ['origin_rejected', 'origin_error', 'edge_rejected'].includes(event.edge?.disposition)),
         rateLimited: count((event) => event.edge?.disposition === 'origin_rate_limited'),
         blocked: count((event) => event.edge?.disposition === 'waf_blocked'),
         edgeRejected: count((event) => event.edge?.disposition === 'edge_rejected'),
@@ -464,7 +519,7 @@ class SecurityEvents {
       countries: [...countries].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         .slice(0, 8).map(([country, value]) => ({ country, count: value })),
       filterOptions: {
-        severities: [...LEVELS], types: [...TYPES], categories: [...CATEGORIES],
+        severities: [...LEVELS], types: [...TYPES].filter((type) => type !== 'waf_outcome'), categories: [...CATEGORIES],
         countries: [...countries].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
           .map(([country, count]) => ({ country, count })),
       },

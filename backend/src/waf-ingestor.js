@@ -12,8 +12,17 @@ const CATEGORIES = new Set([
 ]);
 const DISPOSITIONS = new Set([
   'observed_passed', 'origin_rejected', 'origin_rate_limited', 'waf_blocked',
-  'edge_rejected', 'outcome_unknown',
+  'edge_rejected', 'origin_error', 'outcome_unknown',
 ]);
+
+function expectedDisposition(value) {
+  if (value.edge.interrupted === true) return 'waf_blocked';
+  if (value.edge.originReached === false) return 'edge_rejected';
+  if (value.http.status === 429) return 'origin_rate_limited';
+  if (value.http.status >= 500) return 'origin_error';
+  if (value.http.status >= 400) return 'origin_rejected';
+  return 'observed_passed';
+}
 
 function atomicJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -23,12 +32,15 @@ function atomicJson(file, value) {
 }
 
 function validate(value) {
-  if (!value || value.version !== 1 || value.source !== 'waf'
-    || !['info', 'warning', 'critical'].includes(value.severity)
-    || !CATEGORIES.has(value.category) || !DISPOSITIONS.has(value.outcome)
+  const outcomeOnly = value?.source === 'waf_outcome';
+  if (!value || value.version !== 1 || !['waf', 'waf_outcome'].includes(value.source)
+    || !outcomeOnly && (!['info', 'warning', 'critical'].includes(value.severity)
+      || !CATEGORIES.has(value.category)) || !DISPOSITIONS.has(value.outcome)
     || !value.http || typeof value.http !== 'object' || !value.edge || typeof value.edge !== 'object'
-    || value.http.statusSource !== undefined && !['modsecurity_audit', 'edge_policy'].includes(value.http.statusSource)
+    || value.http.statusSource !== undefined && !['modsecurity_audit', 'edge_policy', 'edge_access'].includes(value.http.statusSource)
     || value.http.auditStatus !== undefined && value.http.auditStatus !== null && !Number.isInteger(value.http.auditStatus)
+    || value.http.upstreamStatus !== undefined && value.http.upstreamStatus !== null
+      && !Number.isInteger(value.http.upstreamStatus)
     || value.edge.statusVerified !== undefined && typeof value.edge.statusVerified !== 'boolean'
     || value.edge.originReached !== undefined && value.edge.originReached !== null
       && typeof value.edge.originReached !== 'boolean'
@@ -41,9 +53,13 @@ function validate(value) {
         && value.http.status === 444 && value.edge.originReached === false
         && value.edge.disposition === 'edge_rejected' && net.isIP(value.edge.target || '')
         && value.edge.ruleIds?.map(String).includes('920350'))
+      && !(value.http.statusSource === 'edge_access' && Number.isInteger(value.http.status)
+        && value.edge.disposition === expectedDisposition(value))
     || !Number.isFinite(Date.parse(value.at || '')) || Date.parse(value.at) > Date.now() + 5 * 60 * 1000
     || typeof value.sourceIp !== 'string' || value.sourceIp.length > 64
-    || value.transactionId !== null && !/^[A-Za-z0-9_-]{1,128}$/.test(value.transactionId || '')) {
+    || value.transactionId !== null && !/^[A-Za-z0-9_-]{1,128}$/.test(value.transactionId || '')
+    || outcomeOnly && (value.http.statusSource !== 'edge_access' || value.edge.statusVerified !== true
+      || typeof value.edge.originReached !== 'boolean')) {
     throw new Error('Invalid WAF telemetry event');
   }
   return value;
@@ -94,11 +110,17 @@ class WafIngestor {
             const correlation = event.transactionId || crypto.createHash('sha256').update(JSON.stringify([
               event.at, event.sourceIp, event.http.method, event.http.path, event.category,
             ])).digest('base64url').slice(0, 32);
-            const identity = `${correlation}:${event.category}`;
+            const identity = event.source === 'waf_outcome' ? `outcome:${correlation}`
+              : `${correlation}:${event.category}`;
             if (this.ids.has(identity)) continue;
-            const recorded = this.securityEvents.record('waf_finding', { at: event.at, ip: event.sourceIp,
-              severity: event.severity, category: event.category, outcome: event.outcome,
-              http: event.http, edge: { ...event.edge, mode: this.mode } });
+            const recorded = event.source === 'waf_outcome'
+              ? this.securityEvents.record('waf_outcome', { at: event.at, ip: event.sourceIp,
+                severity: 'info', outcome: event.outcome, requestId: event.requestId,
+                http: event.http, edge: event.edge })
+              : this.securityEvents.record('waf_finding', { at: event.at, ip: event.sourceIp,
+                severity: event.severity, category: event.category, outcome: event.outcome,
+                requestId: event.requestId || event.transactionId,
+                http: event.http, edge: { ...event.edge, mode: this.mode } });
             if (!recorded) { rejected += 1; continue; }
             this.ids.add(identity);
             ingested += 1;

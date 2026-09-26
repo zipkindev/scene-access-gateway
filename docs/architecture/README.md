@@ -93,8 +93,9 @@ The system intentionally does not pretend that one log can see everything:
 4. Authentik records identity, failed-login, invitation, group, and
    administrative events.
 
-The WAF collector collapses correlation rules and multiple CRS messages from
-one transaction into a single normalized finding. It strips query values,
+The WAF collector joins the ModSecurity audit and a minimal Nginx edge-access
+record on their shared request ID, then collapses correlation rules and
+multiple CRS messages from one transaction into a single normalized finding. It strips query values,
 headers, bodies, cookies, authorization values, and uploads before the backend
 re-signs the event into its integrity-protected ledger. The collector has no
 network or Telegram credentials. Scene Management owns observation and alert
@@ -115,4 +116,7 @@ host is another deterministic final outcome: numeric-host traffic matching CRS
 `edge_rejected`, with origin reachability explicitly false. Other
 non-interrupted findings remain unverified until they are correlated with the
 origin/edge access log. This keeps WAF detection, edge enforcement, and
-application reachability as separate architectural facts.
+application reachability as separate architectural facts. A late access record
+is appended as an integrity-protected outcome correction and folded into its
+original finding at read time; it is not shown as a second event and does not
+generate a second Telegram alert.

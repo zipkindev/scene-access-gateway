@@ -169,21 +169,29 @@ data, and uploads. Transaction identifiers that do not meet the ledger's
 bounded identifier syntax are converted to stable SHA-256-derived correlation
 IDs. A first scan marks existing audit files historical: those records remain
 available for investigation but do not create Telegram notifications. Live
-records are correlated by source, target, and category; duplicate events are
+requests also produce a minimal, query-free Nginx correlation record with the
+shared transaction ID, sanitized path, final client status, and upstream
+status. The networkless collector joins it to the audit before ingestion. If
+the access record arrives later, an integrity-protected outcome correction is
+folded into the original finding, so the UI, CSV, and Telegram expose one
+unified request rather than duplicate events. Live findings are also grouped
+by source, target, and category; duplicate events are
 aggregated and sustained incidents can produce bounded reminders according to
 the Scene Management policy.
 
 Finding severity is derived from the matched CRS rule severity and
 high-confidence attack category, not from a response code. In the UI and
-Telegram, audit status is labeled `WAF audit HTTP` until it is correlated with
-the edge access record or a deterministic edge policy. A non-interrupted audit
+Telegram, audit status is labeled `WAF audit HTTP` while automatic edge
+correlation is pending. Once joined, `Final HTTP` is the client response,
+`audit phase HTTP` remains separate evidence, and upstream reachability is
+explicit. A non-interrupted audit
 `2xx` does not prove that the client received a success response,
 authenticated, reached an administrative function, or exploited the
 application. The event model reports detection, enforcement, and origin
 reachability separately. A WAF interruption is recorded as `WAF blocked`; the
 numeric-Host default-server contract is recorded as `Edge HTTP 444`, `edge
 policy rejected`, and `origin not reached`; other DetectionOnly findings remain
-`final outcome unverified` until correlated. The audit-phase status is retained
+`final outcome unverified` only while correlation is pending. The audit-phase status is retained
 separately for diagnosis. Normalized findings include a safe CRS rule
 explanation plus the sanitized method, path, result provenance, action, and WAF
 mode without retaining request headers, query values, or bodies.

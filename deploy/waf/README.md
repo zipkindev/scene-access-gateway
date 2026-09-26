@@ -65,9 +65,12 @@ services:
 The backend validates and re-signs normalized findings into its bounded
 security ledger. Scene Management shows the target, sanitized path, CRS rule
 IDs, anomaly score, and audit-reported status class. A ModSecurity audit
-`response.http_code` is not assumed to be the final client response: it is
-labeled `WAF audit HTTP` and remains unverified until correlated with the edge
-access record. A true ModSecurity interruption is a verified edge outcome. The
+`response.http_code` is not assumed to be the final client response. Nginx
+writes a separate minimal record with `$request_id`, `$uri`, final status, and
+upstream status; it excludes query strings, headers, user agents, cookies, and
+bodies. The collector joins the two records by exact request ID. The UI labels
+unmatched evidence `WAF audit HTTP` while automatic correlation is pending and
+labels a joined result `Final HTTP`. A true ModSecurity interruption is a verified edge outcome. The
 WAF mode is display-only: enforcement changes remain reviewed deployment
 operations rather than browser-controlled mutations.
 

@@ -49,6 +49,7 @@ services:
       MODSEC_REQ_BODY_NOFILES_LIMIT: "131072"
       MODSEC_UPLOAD_KEEP_FILES: "Off"
       ACCESSLOG: /dev/stdout
+      WAF_CORRELATION_LOG: /var/log/modsecurity/audit/waf-access.jsonl
       ERRORLOG: /dev/stderr
       LOGLEVEL: warn
     volumes:
@@ -131,6 +132,7 @@ services:
       WAF_AUDIT_ROOT: /var/log/modsecurity/audit
       WAF_EVENT_OUTPUT: /var/lib/waf-telemetry/events.jsonl
       WAF_COLLECTOR_STATE: /var/lib/waf-telemetry/collector-state.json
+      WAF_ACCESS_LOG: /var/log/modsecurity/audit/waf-access.jsonl
       WAF_EVENT_MAX_BYTES: "67108864"
     volumes:
       - ${SAG_WAF_AUDIT_DIR:?Set the protected WAF audit directory}:/var/log/modsecurity/audit:ro

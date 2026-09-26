@@ -99,8 +99,8 @@ test('persistent incidents re-alert after the configured interval and separate t
   await alerts.draining;
   assert.equal(requests.length, 2);
   assert.match(requests[1].text, /total: 3/);
-  assert.match(requests[1].text, /audit-reported 4xx 2/);
-  assert.match(requests[1].text, /audit-reported 429 1/);
+  assert.match(requests[1].text, /verified final 4xx 2/);
+  assert.match(requests[1].text, /verified final 429 1/);
   assert.equal(alerts.enqueue({ ...finding, edge: { ...finding.edge, target: 'arcade.example.invalid' } }), true);
   await alerts.draining;
   assert.equal(requests.length, 3);

@@ -270,16 +270,20 @@ CRS findings and whether ModSecurity interrupted the transaction. A response
 code taken from the ModSecurity JSON audit is explicitly labeled `WAF audit
 HTTP`; it is not treated as the final client response unless the WAF itself
 interrupted the request or a deterministic edge policy supplies the final
-result. For other non-interrupted requests, correlate the WAF
-transaction/request ID and time with the origin edge access record before
-concluding that the origin returned `2xx`, `4xx`, or `429`. This prevents an
+result. For other non-interrupted requests, the networkless collector
+automatically joins the audit and edge access record by the exact shared
+transaction/request ID before concluding that the client received `2xx`,
+`4xx`, `429`, or `5xx`. This prevents an
 audit `200` from creating a false success signal when the edge actually
 returned a denial or not-found response. Severity comes from the matched CRS
 rule and detection confidence rather than status. Cards and Telegram alerts
 include the sanitized request, audit-status provenance, CRS IDs, safe rule
 descriptions, and a plain-English action and meaning. Raw headers, query
-values, bodies, cookies, and authorization data remain excluded. Telegram
-incidents are keyed by source
+values, bodies, cookies, and authorization data remain excluded. If the access
+record is briefly delayed, the card says automatic correlation is pending. A
+later exact-ID match is stored as a signed outcome correction and folded into
+the original card, CSV row, and API result; operators never need to compare two
+visible events. Timestamp-only guesses are not used. Telegram incidents are keyed by source
 fingerprint, target, and attack category. The first qualifying event alerts
 immediately, duplicates accumulate, and ongoing activity re-alerts at the
 configured persistence interval. A quiet interval closes the active incident.
@@ -291,8 +295,9 @@ proxying. CRS 920350 plus a numeric target is therefore presented as a verified
 code remains visible as non-final evidence. This is edge host-policy
 enforcement, not a DetectionOnly CRS block. A true CRS interruption is shown
 separately as `waf_blocked`. All other non-interrupted findings are
-`outcome_unknown` until a final access record establishes whether the origin
-was reached.
+`outcome_unknown` only until a final access record establishes whether the
+origin proxy was reached. The final response status, audit-phase status, and
+upstream status remain separate fields.
 
 Recognized remote-access product paths are categorized as
 `service_enumeration` and enriched with the probed family (RDP Web,
@@ -307,7 +312,7 @@ requests that may require application controls.
 severity, event, category, location, source, method, status, and disposition
 filters. It exports every matching retained event rather than only the visible
 250 rows. The CSV contains sanitized ledger data and splits final HTTP status,
-status provenance, audit-phase HTTP status, WAF disposition, origin
+status provenance, audit-phase HTTP status, upstream HTTP status, WAF disposition, origin
 reachability, rules, and behavior into separate columns. It does not add raw
 headers, query values, cookies, request bodies, authorization data, or secrets.
 

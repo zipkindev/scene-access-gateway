@@ -924,11 +924,13 @@ function readableSecurityValue(value) {
 
 function wafDispositionLabel(disposition, mode = null, statusVerified = false) {
   const labels = {
-    observed_passed: mode === 'DetectionOnly'
-      ? 'Observed only (DetectionOnly; audit reported 2xx/3xx)'
-      : 'Observed only (WAF audit reported 2xx/3xx)',
-    origin_rejected: statusVerified ? 'Rejected before the origin' : 'WAF audit reported 4xx; final edge status unverified',
-    origin_rate_limited: statusVerified ? 'Rate-limited before the origin' : 'WAF audit reported 429; final edge status unverified',
+    observed_passed: statusVerified
+      ? 'WAF allowed; final client response verified'
+      : mode === 'DetectionOnly' ? 'Observed only (DetectionOnly; audit reported 2xx/3xx)'
+        : 'Observed only (WAF audit reported 2xx/3xx)',
+    origin_rejected: statusVerified ? 'Origin returned final 4xx' : 'WAF audit reported 4xx; final edge status unverified',
+    origin_rate_limited: statusVerified ? 'Origin returned final HTTP 429' : 'WAF audit reported 429; final edge status unverified',
+    origin_error: statusVerified ? 'Origin returned final 5xx' : 'WAF audit reported 5xx; final edge status unverified',
     waf_blocked: 'Blocked by WAF before the origin',
     edge_rejected: 'Rejected by edge host policy before the application',
     outcome_unknown: 'Final edge and application outcome unverified',
@@ -939,14 +941,15 @@ function wafDispositionLabel(disposition, mode = null, statusVerified = false) {
 function wafOutcomeMeaning(event) {
   if (event.edge?.statusVerified !== true) {
     return event.http?.status !== null
-      ? `ModSecurity audit reported HTTP ${event.http.status}; use the correlated edge access log for the final response status`
-      : 'Use the correlated edge access log to determine the final response status';
+      ? `ModSecurity audit reported HTTP ${event.http.status}; automatic edge correlation is pending`
+      : 'Automatic edge correlation is pending';
   }
   if (event.edge?.disposition === 'observed_passed') {
     return 'The WAF did not block this request; that alone does not prove access or exploitation';
   }
   if (event.edge?.disposition === 'origin_rejected') return 'The origin rejected the request';
   if (event.edge?.disposition === 'origin_rate_limited') return 'The origin rate-limited the request';
+  if (event.edge?.disposition === 'origin_error') return 'The origin returned a server error';
   if (event.edge?.disposition === 'waf_blocked') return 'The request did not reach the origin';
   if (event.edge?.disposition === 'edge_rejected') {
     return 'The edge returned HTTP 444 without proxying; the application was not reached';
@@ -1979,6 +1982,8 @@ function securityEventRow(event) {
   if (event.http?.path) detail.append(' · ' + event.http.method + ' ' + event.http.path
     + (event.http.status !== null ? (event.type === 'waf_finding' && event.http.statusSource === 'edge_policy'
       ? ' → Edge HTTP ' + event.http.status
+      : event.type === 'waf_finding' && event.http.statusSource === 'edge_access'
+        ? ' → Final HTTP ' + event.http.status
       : event.type === 'waf_finding' && event.edge?.statusVerified !== true
         ? ' → WAF audit HTTP ' + event.http.status : ' → HTTP ' + event.http.status) : '')
     + (Number.isInteger(event.http.auditStatus)

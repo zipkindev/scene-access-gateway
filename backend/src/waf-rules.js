@@ -132,7 +132,7 @@ function presentWafEvent(event) {
     event.severity = 'warning';
     event.edge.behaviorSummary = behavior;
   }
-  if (defaultHostRejection(event.edge?.target, ids)) {
+  if (defaultHostRejection(event.edge?.target, ids) && event.http?.statusSource !== 'edge_access') {
     if (event.http && event.http.statusSource === 'modsecurity_audit'
       && Number.isInteger(event.http.status)) event.http.auditStatus = event.http.status;
     if (event.http) {
@@ -153,5 +153,24 @@ function presentWafEvent(event) {
   return event;
 }
 
+function applyWafOutcome(event, correction) {
+  if (event?.type !== 'waf_finding' || correction?.type !== 'waf_outcome'
+    || !event.edge?.transactionId
+    || event.edge.transactionId !== correction.edge?.transactionId
+    || correction.integrityValid !== true || correction.edge?.statusVerified !== true) return event;
+  const auditStatus = Number.isInteger(event.http?.auditStatus) ? event.http.auditStatus
+    : event.http?.statusSource === 'modsecurity_audit' && Number.isInteger(event.http.status)
+      ? event.http.status : null;
+  event.http = { ...event.http, status: correction.http?.status ?? event.http?.status ?? null,
+    statusSource: 'edge_access', auditStatus,
+    upstreamStatus: correction.http?.upstreamStatus ?? null };
+  event.edge = { ...event.edge, disposition: correction.edge.disposition,
+    statusVerified: true, originReached: correction.edge.originReached };
+  event.outcome = correction.edge.disposition;
+  event.requestId = correction.requestId || event.requestId;
+  return event;
+}
+
 module.exports = { CATEGORY_PRIORITY, RULES, findingCategory, findingSeverity, messageCategory,
-  defaultHostRejection, pathFinding, presentWafEvent, ruleSeverity, ruleSummary, serviceEnumeration };
+  applyWafOutcome, defaultHostRejection, pathFinding, presentWafEvent,
+  ruleSeverity, ruleSummary, serviceEnumeration };

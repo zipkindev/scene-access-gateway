@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { WafCollector, normalizeAudit, safeTransactionId } = require('../waf-collector');
+const { WafCollector, accessOutcome, correlateAudit, normalizeAudit, safeTransactionId } = require('../waf-collector');
 
 test('standalone collector keeps its polling timer referenced', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'waf-collector.js'), 'utf8');
@@ -17,6 +17,15 @@ test('numeric-host edge outcome inference matches the WAF default-server policy'
   const source = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'deploy', 'waf', 'default.conf.template'), 'utf8');
   assert.match(source, /listen \$\{WAF_LISTEN_PORT\} ssl default_server;/);
   assert.match(source, /location \/ \{ return 444; \}/);
+});
+
+test('WAF writes a minimal query-free edge correlation stream', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'deploy', 'waf', 'logging.conf.template'), 'utf8');
+  assert.match(source, /log_format waf_correlation/);
+  assert.match(source, /"request_id":"\$request_id"/);
+  assert.match(source, /"uri":"\$uri"/);
+  assert.match(source, /"upstream_status":"\$upstream_status"/);
+  assert.match(source, /access_log \$\{WAF_CORRELATION_LOG\} waf_correlation/);
 });
 
 test('ModSecurity transaction IDs are retained or converted to stable ledger-safe IDs', () => {
@@ -102,6 +111,22 @@ test('a ModSecurity interruption is a verified final edge outcome', () => {
   assert.doesNotThrow(() => validate(value));
 });
 
+test('edge access correlation supplies one verified final outcome while preserving audit status', () => {
+  const edge = accessOutcome({ time: '2026-09-23T14:00:00Z', request_id: 'edge_request_01',
+    remote_addr: '203.0.113.42', host: 'access.example.invalid', method: 'GET',
+    uri: '/.env', status: 404, upstream_status: '404' });
+  const value = correlateAudit(normalizeAudit(audit({ response: { http_code: 200 } })), edge);
+  assert.equal(value.http.status, 404);
+  assert.equal(value.http.statusSource, 'edge_access');
+  assert.equal(value.http.auditStatus, 200);
+  assert.equal(value.http.upstreamStatus, 404);
+  assert.equal(value.edge.statusVerified, true);
+  assert.equal(value.edge.originReached, true);
+  assert.equal(value.edge.disposition, 'origin_rejected');
+  assert.equal(value.outcome, 'origin_rejected');
+  assert.doesNotThrow(() => validate(value));
+});
+
 test('remote-access product paths are classified as service enumeration', () => {
   for (const [uri, summary] of [
     ['/RDWeb/Pages/en-US/login.aspx', 'Microsoft Remote Desktop Web service enumeration'],
@@ -159,7 +184,7 @@ test('collector and ingestor persist, deduplicate, and expose WAF status', () =>
     fs.mkdirSync(auditRoot);
     fs.writeFileSync(path.join(auditRoot, 'event.json'), JSON.stringify(audit()));
     const output = path.join(telemetry, 'events.jsonl');
-    const collector = new WafCollector(auditRoot, output, path.join(telemetry, 'collector-state.json'));
+    const collector = new WafCollector(auditRoot, output, path.join(telemetry, 'collector-state.json'), { graceMs: 0 });
     assert.equal(collector.scan(), 1);
     assert.equal(collector.scan(), 0);
     const normalized = JSON.parse(fs.readFileSync(output, 'utf8').trim());
@@ -188,5 +213,62 @@ test('collector and ingestor persist, deduplicate, and expose WAF status', () =>
       ingestion: { ...ingestor.status() },
     });
     assert.equal(new WafIngestor(null, security, data, { mode: 'On' }).status().mode, 'On');
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('collector joins late access evidence and the ledger exposes one corrected finding', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sag-waf-late-edge-'));
+  try {
+    const auditRoot = path.join(directory, 'audit');
+    const telemetry = path.join(directory, 'telemetry');
+    const data = path.join(directory, 'data');
+    fs.mkdirSync(auditRoot);
+    fs.writeFileSync(path.join(auditRoot, 'event.json'), JSON.stringify(audit({ response: { http_code: 200 } })));
+    const accessLog = path.join(auditRoot, 'waf-access.jsonl');
+    fs.writeFileSync(accessLog, '');
+    const output = path.join(telemetry, 'events.jsonl');
+    const collector = new WafCollector(auditRoot, output, path.join(telemetry, 'collector-state.json'),
+      { accessLog, graceMs: 0 });
+    assert.equal(collector.scan(), 1);
+    fs.appendFileSync(accessLog, JSON.stringify({ time: '2026-09-23T14:00:00Z',
+      request_id: 'edge_request_01', remote_addr: '203.0.113.42', host: 'access.example.invalid',
+      method: 'GET', uri: '/.env', status: 404, upstream_status: '404' }) + '\n');
+    assert.equal(collector.scan(), 1);
+    const normalized = fs.readFileSync(output, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(normalized.map((event) => event.source), ['waf', 'waf_outcome']);
+    const security = new SecurityEvents(data, noGeo);
+    const ingestor = new WafIngestor(output, security, data);
+    assert.equal(ingestor.poll(), 2);
+    const visible = security.list({ stream: 'waf', since: 'all' });
+    assert.equal(visible.length, 1);
+    assert.equal(visible[0].http.status, 404);
+    assert.equal(visible[0].http.auditStatus, 200);
+    assert.equal(visible[0].http.statusSource, 'edge_access');
+    assert.equal(visible[0].edge.originReached, true);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('late edge outcomes fold into the original signed finding instead of creating a second visible event', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sag-waf-outcome-'));
+  try {
+    const events = new SecurityEvents(directory, noGeo);
+    events.record('waf_finding', { at: new Date().toISOString(), ip: '203.0.113.42', severity: 'critical',
+      category: 'sensitive_file_enumeration', outcome: 'outcome_unknown',
+      http: { method: 'GET', path: '/.env', status: 200, statusSource: 'modsecurity_audit' },
+      edge: { target: 'access.example.invalid', disposition: 'outcome_unknown', ruleIds: ['930130'],
+        statusVerified: false, originReached: null, transactionId: 'edge_request_01' } });
+    events.record('waf_outcome', { at: new Date().toISOString(), ip: '203.0.113.42', severity: 'info',
+      outcome: 'origin_rejected', http: { method: 'GET', path: '/.env', status: 404,
+        statusSource: 'edge_access', upstreamStatus: 404 }, edge: { target: 'access.example.invalid',
+        disposition: 'origin_rejected', statusVerified: true, originReached: true,
+        transactionId: 'edge_request_01' } });
+    const visible = events.list({ since: 'all' });
+    assert.equal(visible.length, 1);
+    assert.equal(visible[0].type, 'waf_finding');
+    assert.equal(visible[0].http.status, 404);
+    assert.equal(visible[0].http.auditStatus, 200);
+    assert.equal(visible[0].http.statusSource, 'edge_access');
+    assert.equal(visible[0].edge.originReached, true);
+    assert.equal(visible[0].edge.disposition, 'origin_rejected');
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

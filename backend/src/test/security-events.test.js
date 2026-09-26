@@ -111,10 +111,11 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(client, /Scene Management/);
   assert.match(client, /GeoIP databases updated/);
   assert.match(client, /edge policy rejected · origin not reached/);
-  assert.match(client, /use the correlated edge access log for the final response status/);
+  assert.match(client, /automatic edge correlation is pending/);
   assert.match(client, /Final edge and application outcome unverified/);
   assert.match(client, /WAF audit HTTP/);
   assert.match(client, /Edge HTTP/);
+  assert.match(client, /Final HTTP/);
   assert.match(client, /securityMap/);
   assert.match(client, /SecurityGlobe\.create/);
   assert.match(client, /Threat connection globe/);
@@ -147,7 +148,7 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(html, /security-globe\.js\?v=99/);
   assert.match(html, /Enable public click debugger/);
   assert.match(client, /scene\.diagnostics = \{ clickDebugger: elements\.clickDebugger\.checked \}/);
-  assert.match(html, /admin\.js\?v=111/);
+  assert.match(html, /admin\.js\?v=112/);
   const globe = fs.readFileSync(path.join(__dirname, '../security-globe.js'), 'utf8');
   assert.match(globe, /cameraSequence/);
   assert.match(globe, /routeDuration/);
@@ -351,6 +352,7 @@ test('authenticated Scene Management exposes summary and redacted events', async
     assert.match(csv.headers['Content-Disposition'], /^attachment; filename="scene-access-security-events-/);
     assert.equal(csv.headers['X-Event-Count'], '1');
     assert.match(csv.body, /"audit_http_status"/);
+    assert.match(csv.body, /"upstream_http_status"/);
     assert.match(csv.body, /"origin_reached"/);
     assert.match(csv.body, /"access_request"/);
     assert.doesNotMatch(csv.body, /private@example\.com/);
