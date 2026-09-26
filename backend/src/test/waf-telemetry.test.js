@@ -6,6 +6,20 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { WafCollector, accessOutcome, correlateAudit, normalizeAudit, safeTransactionId } = require('../waf-collector');
+const { PRESENTATION_RULESET, RULES } = require('../waf-rules');
+
+test('current presentation rules cover every rule observed during DetectionOnly review', () => {
+  const observed = ['200003', '911100', '920100', '920340', '920420', '932240', '933160',
+    '933210', '934100', '934130', '941340', '941390', '942120', '942200', '942300',
+    '942340', '942370', '942430', '942550', '950100'];
+  assert.equal(PRESENTATION_RULESET, '2026-09-26.2');
+  for (const id of observed) {
+    assert.ok(RULES[id], `missing observed security rule ${id}`);
+    assert.ok(RULES[id].summary.length > 12, `vague observed security rule ${id}`);
+  }
+  assert.equal(RULES['941340'].category, 'cross_site_scripting_probe');
+  assert.equal(RULES['950100'].category, 'application_error_exposure');
+});
 
 test('standalone collector keeps its polling timer referenced', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'waf-collector.js'), 'utf8');

@@ -151,7 +151,7 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(html, /security-globe\.js\?v=99/);
   assert.match(html, /Enable public click debugger/);
   assert.match(client, /scene\.diagnostics = \{ clickDebugger: elements\.clickDebugger\.checked \}/);
-  assert.match(html, /admin\.js\?v=114/);
+  assert.match(html, /admin\.js\?v=115/);
   const globe = fs.readFileSync(path.join(__dirname, '../security-globe.js'), 'utf8');
   assert.match(globe, /cameraSequence/);
   assert.match(globe, /routeDuration/);
@@ -179,7 +179,7 @@ test('stored WAF protocol findings are re-ranked for presentation without rewrit
   assert.equal(listed[0].edge.originReached, false);
   assert.equal(listed[0].edge.ruleSummary, 'Numeric IP used as the HTTP Host header');
   assert.equal(listed[0].edge.correlationStatus, 'verified');
-  assert.equal(listed[0].classificationVersion, '2026-09-26.1');
+  assert.equal(listed[0].classificationVersion, '2026-09-26.2');
   assert.equal(fs.readFileSync(path.join(directory, 'security-events', written.at.slice(0, 10) + '.jsonl'), 'utf8'), stored);
 }));
 

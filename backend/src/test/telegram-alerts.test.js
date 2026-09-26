@@ -124,7 +124,7 @@ test('WAF Telegram alerts distinguish edge rejection from the audit-phase status
   assert.equal(requests.length, 1);
   assert.match(requests[0].text, /Request: GET \/RDWeb → Edge HTTP 444/);
   assert.match(requests[0].text, /Audit phase: HTTP 200 \(not the final client response\)/);
-  assert.match(requests[0].text, /Matched: CRS 920350 · Numeric IP used as the HTTP Host header/);
+  assert.match(requests[0].text, /Matched security rules: 920350 · Numeric IP used as the HTTP Host header/);
   assert.match(requests[0].text, /Behavior: Microsoft Remote Desktop Web service enumeration/);
   assert.match(requests[0].text, /WAF action: Rejected by edge host policy before proxying to the application/);
   assert.match(requests[0].text, /application was not reached/);
@@ -146,7 +146,7 @@ test('successful WAF observations state the concrete origin result without gener
     } })), true);
   await alerts.draining;
   assert.match(requests[0].text, /WAF action: Origin returned a final 2xx\/3xx response/);
-  assert.match(requests[0].text, /Matched: CRS 920320 · Request missing User-Agent header/);
+  assert.match(requests[0].text, /Matched security rules: 920320 · Request missing User-Agent header/);
   assert.doesNotMatch(requests[0].text, /prove access or exploitation/);
 }));
 

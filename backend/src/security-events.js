@@ -13,10 +13,11 @@ const TYPES = new Set([
   'request_rejected', 'suspicious_request', 'waf_finding', 'waf_outcome', 'admin_action',
 ]);
 const CATEGORIES = new Set([
-  'sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
+  'sql_injection_probe', 'command_injection_probe', 'cross_site_scripting_probe', 'path_traversal_probe',
   'automated_scanner_probe', 'unexpected_http_method', 'invalid_content_length',
   'sensitive_file_enumeration', 'backup_file_probe', 'framework_admin_probe',
-  'known_scanner', 'service_enumeration', 'protocol_anomaly', 'rate_limiting', 'integrity_failure',
+  'known_scanner', 'service_enumeration', 'application_error_exposure', 'protocol_anomaly',
+  'rate_limiting', 'integrity_failure',
 ]);
 const TOKEN = /\b[A-Za-z0-9_-]{43}\b/g;
 const SQL = /(?:\bunion\s+(?:all\s+)?select\b|\binformation_schema\b|\b(?:sleep|benchmark)\s*\(|\bwaitfor\s+delay\b|(?:'|%27)\s*(?:or|and)\s+['"%\d])/i;

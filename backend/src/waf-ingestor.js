@@ -6,9 +6,10 @@ const net = require('node:net');
 const path = require('node:path');
 
 const CATEGORIES = new Set([
-  'sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
+  'sql_injection_probe', 'command_injection_probe', 'cross_site_scripting_probe', 'path_traversal_probe',
   'automated_scanner_probe', 'sensitive_file_enumeration', 'backup_file_probe',
-  'framework_admin_probe', 'known_scanner', 'service_enumeration', 'protocol_anomaly',
+  'framework_admin_probe', 'known_scanner', 'service_enumeration', 'application_error_exposure',
+  'unexpected_http_method', 'protocol_anomaly',
 ]);
 const DISPOSITIONS = new Set([
   'observed_passed', 'origin_rejected', 'origin_rate_limited', 'waf_blocked',

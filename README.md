@@ -187,8 +187,10 @@ by source, target, and category; duplicate events are
 aggregated and sustained incidents can produce bounded reminders according to
 the Scene Management policy.
 
-Finding severity is derived from the matched CRS rule severity and
-high-confidence attack category, not from a response code. In the UI and
+Finding severity is derived from the matched security-rule severity and
+high-confidence attack category, not from a response code. The presentation
+ruleset includes curated descriptions for every CRS and ModSecurity engine rule
+observed during the initial DetectionOnly review. In the UI and
 Telegram, audit status is labeled `WAF audit HTTP`. The collector waits through
 a short correlation window before exposing an unresolved record. Once joined,
 `Final HTTP` is the client response,

@@ -1751,6 +1751,8 @@ elements.telegramQuietAfter = quietAfterField.input;
 
 const telegramCategoryGrid = document.querySelector('.telegram-categories');
 for (const [category, labelText] of [
+  ['cross_site_scripting_probe', 'Cross-site scripting probes'],
+  ['application_error_exposure', 'Application 500 responses'],
   ['sensitive_file_enumeration', 'Sensitive-file enumeration'],
   ['backup_file_probe', 'Backup-file probes'],
   ['framework_admin_probe', 'Framework administration probes'],
@@ -1991,7 +1993,7 @@ function securityEventRow(event) {
       ? ' · audit phase HTTP ' + event.http.auditStatus + ' (not final)' : ''));
   if (event.edge) detail.append(' · target ' + (event.edge.target || 'unknown')
     + ' · ' + wafDispositionLabel(event.edge.disposition, event.edge.mode, event.edge.statusVerified)
-    + (event.edge.ruleIds?.length ? ' · matched CRS ' + event.edge.ruleIds.join(', ') : '')
+    + (event.edge.ruleIds?.length ? ' · matched security rules ' + event.edge.ruleIds.join(', ') : '')
     + (event.edge.ruleSummary ? ' · ' + event.edge.ruleSummary : '')
     + (event.edge.behaviorSummary ? ' · behavior: ' + event.edge.behaviorSummary : '')
     + (event.edge.originReached === false ? ' · origin not reached'

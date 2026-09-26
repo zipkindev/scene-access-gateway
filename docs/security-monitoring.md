@@ -331,6 +331,13 @@ one bounded backfill across its retained normalized findings and current edge
 correlation log. Exact matches become signed outcome corrections; records whose
 edge evidence has rotated away remain explicitly unavailable.
 
+The ruleset includes curated descriptions for every rule observed during the
+initial DetectionOnly review, including protocol and method violations,
+command/PHP/Node.js injection, prototype-pollution, cross-site scripting, SQL
+injection, multipart validation, and application 500-response findings. Cards
+say `security rules` rather than assuming every identifier belongs to CRS,
+because ModSecurity can also emit engine-level rules such as `200003`.
+
 The public page and the authentication challenge have separate lifecycles. A
 normal `GET /` sets only the short-lived browser-binding cookie and records
 `page_served`. Click progress is transient and browser-bound. The application

@@ -3,24 +3,45 @@
 const net = require('node:net');
 
 const RULES = Object.freeze({
+  '200003': { category: 'protocol_anomaly', severity: 'warning', summary: 'Multipart request body failed strict validation' },
+  '911100': { category: 'unexpected_http_method', severity: 'warning', summary: 'HTTP method is not allowed by policy' },
+  '920100': { category: 'protocol_anomaly', severity: 'warning', summary: 'Invalid HTTP request line' },
   '913100': { category: 'known_scanner', severity: 'warning', summary: 'Known security scanner signature detected' },
   '920280': { category: 'protocol_anomaly', severity: 'warning', summary: 'Request missing required Host header' },
   '920320': { category: 'protocol_anomaly', severity: 'info', summary: 'Request missing User-Agent header' },
+  '920340': { category: 'protocol_anomaly', severity: 'warning', summary: 'Request body has no Content-Type header' },
   '920350': { category: 'protocol_anomaly', severity: 'warning', summary: 'Numeric IP used as the HTTP Host header' },
+  '920420': { category: 'protocol_anomaly', severity: 'warning', summary: 'Request Content-Type is not allowed by policy' },
   '920440': { category: 'protocol_anomaly', severity: 'warning', summary: 'URL file extension restricted by policy' },
   '920451': { category: 'protocol_anomaly', severity: 'critical', summary: 'HTTP header restricted by policy' },
   '920500': { category: 'backup_file_probe', severity: 'warning', summary: 'Backup or working file requested' },
   '930130': { category: 'sensitive_file_enumeration', severity: 'critical', summary: 'Restricted or sensitive file requested' },
   '930140': { category: 'backup_file_probe', severity: 'warning', summary: 'Backup or working file requested' },
+  '932240': { category: 'command_injection_probe', severity: 'critical', summary: 'Unix command-injection evasion pattern detected' },
+  '933160': { category: 'command_injection_probe', severity: 'critical', summary: 'High-risk PHP function-call injection pattern detected' },
+  '933210': { category: 'command_injection_probe', severity: 'critical', summary: 'PHP variable-function injection pattern detected' },
+  '934100': { category: 'command_injection_probe', severity: 'critical', summary: 'Node.js injection pattern detected' },
+  '934130': { category: 'command_injection_probe', severity: 'critical', summary: 'JavaScript prototype-pollution pattern detected' },
+  '941340': { category: 'cross_site_scripting_probe', severity: 'critical', summary: 'Cross-site scripting pattern detected by IE filter signatures' },
+  '941390': { category: 'cross_site_scripting_probe', severity: 'critical', summary: 'Suspicious JavaScript method pattern detected' },
+  '942120': { category: 'sql_injection_probe', severity: 'critical', summary: 'SQL operator injection pattern detected' },
+  '942200': { category: 'sql_injection_probe', severity: 'critical', summary: 'MySQL comment or space-obfuscated injection pattern detected' },
+  '942300': { category: 'sql_injection_probe', severity: 'critical', summary: 'MySQL comment, condition, or character-function injection pattern detected' },
+  '942340': { category: 'sql_injection_probe', severity: 'critical', summary: 'SQL authentication-bypass pattern detected' },
+  '942370': { category: 'sql_injection_probe', severity: 'critical', summary: 'Classic SQL injection probing pattern detected' },
+  '942430': { category: 'sql_injection_probe', severity: 'critical', summary: 'Excessive restricted SQL characters detected' },
+  '942550': { category: 'sql_injection_probe', severity: 'critical', summary: 'JSON-based SQL injection pattern detected' },
+  '950100': { category: 'application_error_exposure', severity: 'warning', summary: 'Application returned a 500-level response' },
 });
 
 const CATEGORY_PRIORITY = [
-  'command_injection_probe', 'sql_injection_probe', 'path_traversal_probe',
+  'command_injection_probe', 'sql_injection_probe', 'cross_site_scripting_probe', 'path_traversal_probe',
   'sensitive_file_enumeration', 'backup_file_probe', 'known_scanner',
-  'framework_admin_probe', 'service_enumeration', 'protocol_anomaly', 'automated_scanner_probe',
+  'framework_admin_probe', 'service_enumeration', 'application_error_exposure',
+  'unexpected_http_method', 'protocol_anomaly', 'automated_scanner_probe',
 ];
 const SEVERITY_RANK = { info: 0, warning: 1, critical: 2 };
-const PRESENTATION_RULESET = '2026-09-26.1';
+const PRESENTATION_RULESET = '2026-09-26.2';
 const SERVICE_ENUMERATION = [
   { pattern: /^\/(?:Remote(?:\/|$)|RDWeb(?:\/|$))/i,
     summary: 'Microsoft Remote Desktop Web service enumeration' },
@@ -120,6 +141,8 @@ function presentWafEvent(event) {
   const allProtocol = ids.every((id) => id.startsWith('920'));
   if (allProtocol) event.category = 'protocol_anomaly';
   if (known.length === ids.length) {
+    const knownCategories = new Set(known.map((value) => value.category));
+    event.category = CATEGORY_PRIORITY.find((candidate) => knownCategories.has(candidate)) || event.category;
     event.severity = known.reduce((highest, value) => SEVERITY_RANK[value.severity] > SEVERITY_RANK[highest]
       ? value.severity : highest, 'info');
   }

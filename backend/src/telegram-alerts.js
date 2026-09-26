@@ -6,16 +6,17 @@ const path = require('node:path');
 
 const LEVELS = ['info', 'warning', 'critical'];
 const CATEGORIES = new Set([
-  'sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
+  'sql_injection_probe', 'command_injection_probe', 'cross_site_scripting_probe', 'path_traversal_probe',
   'automated_scanner_probe', 'unexpected_http_method', 'invalid_content_length',
   'sensitive_file_enumeration', 'backup_file_probe', 'framework_admin_probe',
-  'known_scanner', 'service_enumeration', 'protocol_anomaly', 'rate_limiting', 'integrity_failure',
+  'known_scanner', 'service_enumeration', 'application_error_exposure', 'protocol_anomaly',
+  'rate_limiting', 'integrity_failure',
 ]);
 const DEFAULT_POLICY = Object.freeze({
   version: 3,
   enabled: false,
   minimumSeverity: 'critical',
-  categories: ['sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
+  categories: ['sql_injection_probe', 'command_injection_probe', 'cross_site_scripting_probe', 'path_traversal_probe',
     'sensitive_file_enumeration', 'backup_file_probe', 'known_scanner', 'integrity_failure'],
   countThreshold: 1,
   aggregationWindowSeconds: 60,
@@ -399,7 +400,7 @@ class TelegramAlerts {
     const auditPhase = waf && Number.isInteger(event.http?.auditStatus)
       ? `Audit phase: HTTP ${event.http.auditStatus} (not the final client response)` : null;
     const matched = waf && event.edge.ruleIds?.length
-      ? `Matched: CRS ${event.edge.ruleIds.join(', ')}`
+      ? `Matched security rules: ${event.edge.ruleIds.join(', ')}`
         + (event.edge.ruleSummary ? ` · ${event.edge.ruleSummary}` : '') : null;
     const text = [
       'Scene Access security alert',
