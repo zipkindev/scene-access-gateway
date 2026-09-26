@@ -2,12 +2,13 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const net = require('node:net');
 const path = require('node:path');
 
 const CATEGORIES = new Set([
   'sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
   'automated_scanner_probe', 'sensitive_file_enumeration', 'backup_file_probe',
-  'framework_admin_probe', 'known_scanner', 'protocol_anomaly',
+  'framework_admin_probe', 'known_scanner', 'service_enumeration', 'protocol_anomaly',
 ]);
 const DISPOSITIONS = new Set([
   'observed_passed', 'origin_rejected', 'origin_rate_limited', 'waf_blocked',
@@ -26,9 +27,20 @@ function validate(value) {
     || !['info', 'warning', 'critical'].includes(value.severity)
     || !CATEGORIES.has(value.category) || !DISPOSITIONS.has(value.outcome)
     || !value.http || typeof value.http !== 'object' || !value.edge || typeof value.edge !== 'object'
-    || value.http.statusSource !== undefined && value.http.statusSource !== 'modsecurity_audit'
+    || value.http.statusSource !== undefined && !['modsecurity_audit', 'edge_policy'].includes(value.http.statusSource)
+    || value.http.auditStatus !== undefined && value.http.auditStatus !== null && !Number.isInteger(value.http.auditStatus)
     || value.edge.statusVerified !== undefined && typeof value.edge.statusVerified !== 'boolean'
-    || value.edge.statusVerified === true && value.edge.interrupted !== true
+    || value.edge.originReached !== undefined && value.edge.originReached !== null
+      && typeof value.edge.originReached !== 'boolean'
+    || typeof value.edge.originReached === 'boolean' && value.edge.statusVerified !== true
+    || value.outcome !== value.edge.disposition
+    || value.edge.statusVerified === true
+      && !(value.edge.interrupted === true && value.edge.disposition === 'waf_blocked'
+        && value.edge.originReached === false)
+      && !(value.edge.interrupted !== true && value.http.statusSource === 'edge_policy'
+        && value.http.status === 444 && value.edge.originReached === false
+        && value.edge.disposition === 'edge_rejected' && net.isIP(value.edge.target || '')
+        && value.edge.ruleIds?.map(String).includes('920350'))
     || !Number.isFinite(Date.parse(value.at || '')) || Date.parse(value.at) > Date.now() + 5 * 60 * 1000
     || typeof value.sourceIp !== 'string' || value.sourceIp.length > 64
     || value.transactionId !== null && !/^[A-Za-z0-9_-]{1,128}$/.test(value.transactionId || '')) {

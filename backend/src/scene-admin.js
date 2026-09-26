@@ -138,6 +138,50 @@ function json(response, status, value, headers = {}) {
   send(response, status, { 'Content-Type': 'application/json', ...headers }, JSON.stringify(value));
 }
 
+const SECURITY_FILTER_KEYS = ['stream', 'severity', 'type', 'category', 'country', 'city', 'source',
+  'method', 'status', 'disposition', 'since'];
+
+function securityEventFilters(url, pagination = false) {
+  const allowed = new Set(pagination ? [...SECURITY_FILTER_KEYS, 'limit', 'before'] : SECURITY_FILTER_KEYS);
+  if ([...url.searchParams.keys()].some((key) => !allowed.has(key))
+    || ['since', ...(pagination ? ['limit', 'before'] : [])]
+      .some((key) => url.searchParams.getAll(key).length > 1)) throw new Error('Invalid security-event query');
+  return {
+    limit: pagination ? url.searchParams.get('limit') : null,
+    since: url.searchParams.get('since'),
+    before: pagination ? url.searchParams.get('before') : null,
+    stream: url.searchParams.getAll('stream'), severity: url.searchParams.getAll('severity'),
+    type: url.searchParams.getAll('type'), category: url.searchParams.getAll('category'),
+    country: url.searchParams.getAll('country'), city: url.searchParams.getAll('city'),
+    method: url.searchParams.getAll('method'), status: url.searchParams.getAll('status'),
+    disposition: url.searchParams.getAll('disposition'), source: url.searchParams.getAll('source'),
+  };
+}
+
+function csvCell(value) {
+  if (value === null || value === undefined) return '';
+  let text = Array.isArray(value) ? value.join('|') : String(value);
+  if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function securityCsvRow(event) {
+  return [event.at, event.type, event.severity, event.category, event.source?.ip,
+    event.source?.country, event.source?.city, event.source?.asn, event.source?.organization,
+    event.http?.method, event.http?.path, event.http?.status, event.http?.statusSource,
+    event.http?.auditStatus, event.edge?.disposition, event.edge?.mode, event.edge?.originReached,
+    event.edge?.ruleIds, event.edge?.behaviorSummary, event.edge?.ruleSummary, event.edge?.target,
+    event.outcome, event.requestId, event.integrityValid].map(csvCell).join(',');
+}
+
+function securityCsv(events) {
+  const columns = ['timestamp', 'event_type', 'severity', 'category', 'source_ip', 'country', 'city',
+    'asn', 'organization', 'method', 'path', 'final_http_status', 'status_source', 'audit_http_status',
+    'disposition', 'waf_mode', 'origin_reached', 'crs_rules', 'behavior', 'rule_summary', 'target',
+    'outcome', 'request_id', 'integrity_valid'];
+  return '\uFEFF' + [columns.map(csvCell).join(','), ...events.map(securityCsvRow)].join('\r\n') + '\r\n';
+}
+
 function readImage(request) {
   return new Promise((resolve, reject) => {
     const parts = [];
@@ -312,26 +356,26 @@ function createSceneAdmin(directory, suppliedSecurityEvents = null, suppliedTele
       return json(response, 200, securityEvents.map({ since: since || undefined }));
     }
     if (url.pathname === '/api/security/events' && request.method === 'GET') {
-      const keys = [...url.searchParams.keys()];
-      if (keys.some((key) => !['limit', 'stream', 'severity', 'type', 'category', 'country', 'city', 'source', 'method', 'status', 'disposition', 'since', 'before'].includes(key))
-        || ['limit', 'since', 'before'].some((key) => url.searchParams.getAll(key).length > 1)) {
-        return json(response, 400, { error: 'Invalid security-event query' });
-      }
       try {
-        const filters = {
-          limit: url.searchParams.get('limit'), since: url.searchParams.get('since'), before: url.searchParams.get('before'),
-          stream: url.searchParams.getAll('stream'),
-          severity: url.searchParams.getAll('severity'), type: url.searchParams.getAll('type'),
-          category: url.searchParams.getAll('category'), country: url.searchParams.getAll('country'),
-          city: url.searchParams.getAll('city'),
-          method: url.searchParams.getAll('method'), status: url.searchParams.getAll('status'),
-          disposition: url.searchParams.getAll('disposition'),
-          source: url.searchParams.getAll('source'),
-        };
+        const filters = securityEventFilters(url, true);
         return json(response, 200, {
           ...securityEvents.page(filters),
           filterOptions: securityEvents.filterOptions(filters),
         });
+      } catch (_) { return json(response, 400, { error: 'Invalid security-event query' }); }
+    }
+    if (url.pathname === '/api/security/events.csv' && request.method === 'GET') {
+      try {
+        const events = [];
+        for (const event of securityEvents.matching(securityEventFilters(url))) {
+          if (events.length >= 100000) return json(response, 413, { error: 'Filtered export exceeds 100,000 events; narrow the filters' });
+          events.push(event);
+        }
+        return send(response, 200, {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="scene-access-security-events-${new Date().toISOString().slice(0, 10)}.csv"`,
+          'X-Event-Count': String(events.length),
+        }, securityCsv(events));
       } catch (_) { return json(response, 400, { error: 'Invalid security-event query' }); }
     }
     if (url.pathname === '/api/security/source-intelligence' && request.method === 'GET') {

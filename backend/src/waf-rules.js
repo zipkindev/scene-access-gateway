@@ -1,5 +1,7 @@
 'use strict';
 
+const net = require('node:net');
+
 const RULES = Object.freeze({
   '913100': { category: 'known_scanner', severity: 'warning', summary: 'Known security scanner signature detected' },
   '920350': { category: 'protocol_anomaly', severity: 'warning', summary: 'Numeric IP used as the HTTP Host header' },
@@ -12,9 +14,34 @@ const RULES = Object.freeze({
 const CATEGORY_PRIORITY = [
   'command_injection_probe', 'sql_injection_probe', 'path_traversal_probe',
   'sensitive_file_enumeration', 'backup_file_probe', 'known_scanner',
-  'framework_admin_probe', 'protocol_anomaly', 'automated_scanner_probe',
+  'framework_admin_probe', 'service_enumeration', 'protocol_anomaly', 'automated_scanner_probe',
 ];
 const SEVERITY_RANK = { info: 0, warning: 1, critical: 2 };
+const SERVICE_ENUMERATION = [
+  { pattern: /^\/(?:Remote(?:\/|$)|RDWeb(?:\/|$))/i,
+    summary: 'Microsoft Remote Desktop Web service enumeration' },
+  { pattern: /^\/(?:sslvpnLogin\.html|api\/sonicos\/(?:auth|tfa)|sonicui\/\d+\/sslvpn-portal(?:\/|$)|auth1?\.html)$/i,
+    summary: 'SonicWall SSL-VPN service enumeration' },
+  { pattern: /^\/(?:ecp\/Current\/exporttool\/microsoft\.exchange\.ediscovery\.exporttool\.application|owa\/auth\/(?:logon|errorFE)\.aspx)$/i,
+    summary: 'Microsoft Exchange/OWA service enumeration' },
+  { pattern: /^\/(?:dana-na\/(?:nc\/nc_gina_ver\.txt|auth\/url_default\/welcome\.cgi)|dana-cached\/hc\/HostCheckerInstaller\.osx)$/i,
+    summary: 'Ivanti/Pulse Secure VPN service enumeration' },
+  { pattern: /^\/wsman\/?$/i, summary: 'Windows remote-management service enumeration' },
+  { pattern: /^\/(?:global-protect\/prelogin\.esp|myvpn|vpntunnel|remote\/login|sslvpnclient|svpn\/index\.cgi|dispatch\.asp|auth_portal\/Default\/logo\.gif|\+CSCOU\+\/csco_logo\.gif|fonts\/ftnt-icons\.woff)\/?$/i,
+    summary: 'VPN gateway service enumeration' },
+  { pattern: /^\/version\/?$/i, summary: 'Service version endpoint enumeration' },
+];
+const PATH_FINDINGS = [
+  { category: 'sensitive_file_enumeration', severity: 'critical',
+    pattern: /(?:^|\/)(?:\.env(?:[._~-][^/]*)?|\.git(?:-askpass\.sh|-credentials|-secret|\/|$)|aws_credentials\.ini|credentials\.ini|database\.sql|mysql\.sql|terraform\.tfstate(?:\.backup)?|s3\.key|private\.key|server\.key|settings\.ini|wp_mail_smtp\.ini|wp-config\.php|mailcow\.conf|pip\.conf|php-fpm\.conf|sphinx\.conf|lighttpd\.conf|tomcat-users\.xml|appsettings(?:\.Production)?\.json|application\.(?:properties|ya?ml)|\.pypirc)(?:\/|$)/i,
+    summary: 'Credential, configuration, or data file enumeration' },
+  { category: 'backup_file_probe', severity: 'warning',
+    pattern: /(?:^|\/)(?:backup\.sql|www\.bak|info\.php\.bak|[^/]{1,180}(?:\.bak|\.backup|\.old|\.orig|\.save|\.swp|~))(?:\/|$)/i,
+    summary: 'Backup or working file enumeration' },
+  { category: 'framework_admin_probe', severity: 'warning',
+    pattern: /(?:^|\/)(?:wp-admin|wp-login\.php|phpmyadmin|server-status|actuator|vendor\/phpunit|_profiler|telescope|swagger|v[23]\/api-docs|api-docs|openapi\.(?:json|ya?ml)|ReportServer|developmentserver\/metadatauploader)(?:\/|$)/i,
+    summary: 'Framework or administrative endpoint enumeration' },
+];
 
 function ruleId(message) {
   return String(message?.details?.ruleId || '');
@@ -66,6 +93,20 @@ function ruleSummary(ruleIds) {
   return summaries.slice(0, 3).join('; ') || null;
 }
 
+function defaultHostRejection(target, ruleIds) {
+  const ids = Array.isArray(ruleIds) ? ruleIds.map(String) : [];
+  return net.isIP(String(target || '')) !== 0 && ids.includes('920350');
+}
+
+function serviceEnumeration(pathname, target, ruleIds) {
+  if (!defaultHostRejection(target, ruleIds)) return null;
+  return SERVICE_ENUMERATION.find((item) => item.pattern.test(String(pathname || '')))?.summary || null;
+}
+
+function pathFinding(pathname) {
+  return PATH_FINDINGS.find((item) => item.pattern.test(String(pathname || ''))) || null;
+}
+
 function presentWafEvent(event) {
   if (event?.type !== 'waf_finding' || event.integrityValid === false) return event;
   const ids = Array.isArray(event.edge?.ruleIds) ? event.edge.ruleIds.map(String) : [];
@@ -79,8 +120,38 @@ function presentWafEvent(event) {
   }
   const summary = ruleSummary(ids);
   if (summary) event.edge.ruleSummary = summary;
+  const pathMatch = pathFinding(event.http?.path);
+  if (pathMatch) {
+    event.category = pathMatch.category;
+    event.severity = pathMatch.severity;
+    event.edge.behaviorSummary = pathMatch.summary;
+  }
+  const behavior = serviceEnumeration(event.http?.path, event.edge?.target, ids);
+  if (behavior) {
+    event.category = 'service_enumeration';
+    event.severity = 'warning';
+    event.edge.behaviorSummary = behavior;
+  }
+  if (defaultHostRejection(event.edge?.target, ids)) {
+    if (event.http && event.http.statusSource === 'modsecurity_audit'
+      && Number.isInteger(event.http.status)) event.http.auditStatus = event.http.status;
+    if (event.http) {
+      event.http.status = 444;
+      event.http.statusSource = 'edge_policy';
+    }
+    event.edge.disposition = 'edge_rejected';
+    event.edge.statusVerified = true;
+    event.edge.originReached = false;
+    event.outcome = 'edge_rejected';
+  } else if (event.edge?.statusVerified !== true) {
+    event.edge.disposition = 'outcome_unknown';
+    event.edge.originReached = null;
+    event.outcome = 'outcome_unknown';
+  } else if (event.edge?.disposition === 'waf_blocked') {
+    event.edge.originReached = false;
+  }
   return event;
 }
 
 module.exports = { CATEGORY_PRIORITY, RULES, findingCategory, findingSeverity, messageCategory,
-  presentWafEvent, ruleSeverity, ruleSummary };
+  defaultHostRejection, pathFinding, presentWafEvent, ruleSeverity, ruleSummary, serviceEnumeration };

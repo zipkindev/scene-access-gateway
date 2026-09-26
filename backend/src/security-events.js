@@ -16,7 +16,7 @@ const CATEGORIES = new Set([
   'sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
   'automated_scanner_probe', 'unexpected_http_method', 'invalid_content_length',
   'sensitive_file_enumeration', 'backup_file_probe', 'framework_admin_probe',
-  'known_scanner', 'protocol_anomaly', 'rate_limiting', 'integrity_failure',
+  'known_scanner', 'service_enumeration', 'protocol_anomaly', 'rate_limiting', 'integrity_failure',
 ]);
 const TOKEN = /\b[A-Za-z0-9_-]{43}\b/g;
 const SQL = /(?:\bunion\s+(?:all\s+)?select\b|\binformation_schema\b|\b(?:sleep|benchmark)\s*\(|\bwaitfor\s+delay\b|(?:'|%27)\s*(?:or|and)\s+['"%\d])/i;
@@ -225,7 +225,9 @@ class SecurityEvents {
         method: String(suppliedHttp.method || '').slice(0, 12),
         path: safePath(String(suppliedHttp.path || '/').split('?')[0]),
         status: Number.isInteger(suppliedHttp.status) ? suppliedHttp.status : null,
-        statusSource: suppliedHttp.statusSource === 'modsecurity_audit' ? 'modsecurity_audit' : null,
+        statusSource: ['modsecurity_audit', 'edge_policy'].includes(suppliedHttp.statusSource)
+          ? suppliedHttp.statusSource : null,
+        auditStatus: Number.isInteger(suppliedHttp.auditStatus) ? suppliedHttp.auditStatus : null,
         agentHash: null,
       } : null,
       identityHash: data.identity ? this._hash(String(data.identity).trim().toLowerCase()) : null,
@@ -238,11 +240,14 @@ class SecurityEvents {
         ruleIds: Array.isArray(data.edge.ruleIds) ? [...new Set(data.edge.ruleIds.filter((value) => /^\d{1,10}$/.test(String(value))).map(String))].slice(0, 32) : [],
         ruleSummary: typeof data.edge.ruleSummary === 'string'
           ? data.edge.ruleSummary.slice(0, 240).replace(/[\r\n]/g, '') : null,
+        behaviorSummary: typeof data.edge.behaviorSummary === 'string'
+          ? data.edge.behaviorSummary.slice(0, 240).replace(/[\r\n]/g, '') : null,
         mode: ['DetectionOnly', 'On'].includes(data.edge.mode) ? data.edge.mode : null,
         anomalyScore: Number.isInteger(data.edge.anomalyScore) && data.edge.anomalyScore >= 0 && data.edge.anomalyScore <= 1000
           ? data.edge.anomalyScore : null,
         interrupted: data.edge.interrupted === true,
         statusVerified: data.edge.statusVerified === true,
+        originReached: typeof data.edge.originReached === 'boolean' ? data.edge.originReached : null,
         transactionId: /^[A-Za-z0-9_-]{1,128}$/.test(data.edge.transactionId || '')
           ? data.edge.transactionId : null,
         historical: data.edge.historical === true,
@@ -451,6 +456,8 @@ class SecurityEvents {
         rejected: count((event) => ['origin_rejected', 'edge_rejected'].includes(event.edge?.disposition)),
         rateLimited: count((event) => event.edge?.disposition === 'origin_rate_limited'),
         blocked: count((event) => event.edge?.disposition === 'waf_blocked'),
+        edgeRejected: count((event) => event.edge?.disposition === 'edge_rejected'),
+        unknown: count((event) => event.edge?.disposition === 'outcome_unknown'),
         ingestion: typeof this.wafStatus === 'function' ? this.wafStatus() : { configured: false },
       },
       uniquePublicIps: new Set(events.filter((event) => event.source?.scope === 'public').map((event) => event.source.ip)).size,

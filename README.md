@@ -176,12 +176,32 @@ the Scene Management policy.
 Finding severity is derived from the matched CRS rule severity and
 high-confidence attack category, not from a response code. In the UI and
 Telegram, audit status is labeled `WAF audit HTTP` until it is correlated with
-the edge access record. A non-interrupted audit `2xx` does not prove that the
-client received a success response, authenticated, reached an administrative
-function, or exploited the application. A true WAF interruption is the only
-audit outcome marked verified. Normalized findings include a safe CRS rule
-explanation plus the sanitized method, path, audit status, action, and WAF mode
-without retaining request headers, query values, or bodies.
+the edge access record or a deterministic edge policy. A non-interrupted audit
+`2xx` does not prove that the client received a success response,
+authenticated, reached an administrative function, or exploited the
+application. The event model reports detection, enforcement, and origin
+reachability separately. A WAF interruption is recorded as `WAF blocked`; the
+numeric-Host default-server contract is recorded as `Edge HTTP 444`, `edge
+policy rejected`, and `origin not reached`; other DetectionOnly findings remain
+`final outcome unverified` until correlated. The audit-phase status is retained
+separately for diagnosis. Normalized findings include a safe CRS rule
+explanation plus the sanitized method, path, result provenance, action, and WAF
+mode without retaining request headers, query values, or bodies.
+
+Path-aware presentation distinguishes remote-service enumeration from generic
+protocol anomalies. Recognized Microsoft RDP Web, Exchange/OWA, SonicWall,
+Ivanti/Pulse Secure, Windows remote-management, and VPN-gateway probes are
+grouped as `service_enumeration`; credential/configuration files, backup files,
+and framework administration endpoints keep their own categories and severity.
+This classification describes attacker behavior, not proof that the named
+product exists on the origin.
+
+Scene Management can export the current Security Monitoring view as CSV. The
+export uses the active time range and every active filter and includes only
+sanitized ledger fields. Separate columns identify the final/status-source
+result, audit-phase status, enforcement disposition, CRS rules, behavior
+summary, and whether the origin was reached. Spreadsheet formula prefixes are
+neutralized on export.
 
 Start an internet-facing rollout with `MODSEC_RULE_ENGINE=DetectionOnly` and
 retain application/origin enforcement. Use a one-week observation window to

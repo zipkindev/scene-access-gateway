@@ -13,6 +13,12 @@ test('standalone collector keeps its polling timer referenced', () => {
   assert.match(source, /options\.unref !== false/);
 });
 
+test('numeric-host edge outcome inference matches the WAF default-server policy', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'deploy', 'waf', 'default.conf.template'), 'utf8');
+  assert.match(source, /listen \$\{WAF_LISTEN_PORT\} ssl default_server;/);
+  assert.match(source, /location \/ \{ return 444; \}/);
+});
+
 test('ModSecurity transaction IDs are retained or converted to stable ledger-safe IDs', () => {
   assert.equal(safeTransactionId('edge_request-01'), 'edge_request-01');
   const converted = safeTransactionId('transaction.with:modsecurity/characters');
@@ -48,8 +54,9 @@ test('WAF audits normalize into one sanitized high-confidence finding', () => {
   assert.equal(value.http.path, '/.env');
   assert.equal(value.http.status, 404);
   assert.equal(value.http.statusSource, 'modsecurity_audit');
-  assert.equal(value.edge.disposition, 'origin_rejected');
+  assert.equal(value.edge.disposition, 'outcome_unknown');
   assert.equal(value.edge.statusVerified, false);
+  assert.equal(value.edge.originReached, null);
   assert.deepEqual(value.edge.ruleIds, ['930130']);
   assert.equal(value.edge.ruleSummary, 'Restricted or sensitive file requested');
   assert.equal(value.edge.anomalyScore, 5);
@@ -66,8 +73,14 @@ test('CRS protocol rules retain their own severity and are not promoted by an HT
   }));
   assert.equal(numericHost.category, 'protocol_anomaly');
   assert.equal(numericHost.severity, 'warning');
-  assert.equal(numericHost.edge.disposition, 'observed_passed');
+  assert.equal(numericHost.http.status, 444);
+  assert.equal(numericHost.http.statusSource, 'edge_policy');
+  assert.equal(numericHost.http.auditStatus, 200);
+  assert.equal(numericHost.edge.disposition, 'edge_rejected');
+  assert.equal(numericHost.edge.statusVerified, true);
+  assert.equal(numericHost.edge.originReached, false);
   assert.equal(numericHost.edge.ruleSummary, 'Numeric IP used as the HTTP Host header');
+  assert.doesNotThrow(() => validate(numericHost));
 
   const restrictedHeader = normalizeAudit(audit({
     request: { hostname: '75.178.84.162', method: 'POST', uri: '/wp-json/batch/v1' },
@@ -81,10 +94,54 @@ test('CRS protocol rules retain their own severity and are not promoted by an HT
   assert.equal(restrictedHeader.edge.ruleSummary, 'HTTP header restricted by policy');
 });
 
-test('only a ModSecurity interruption is a verified final edge outcome', () => {
+test('a ModSecurity interruption is a verified final edge outcome', () => {
   const value = normalizeAudit(audit({ is_interrupted: true, response: { http_code: 403 } }));
   assert.equal(value.edge.disposition, 'waf_blocked');
   assert.equal(value.edge.statusVerified, true);
+  assert.equal(value.edge.originReached, false);
+  assert.doesNotThrow(() => validate(value));
+});
+
+test('remote-access product paths are classified as service enumeration', () => {
+  for (const [uri, summary] of [
+    ['/RDWeb/Pages/en-US/login.aspx', 'Microsoft Remote Desktop Web service enumeration'],
+    ['/api/sonicos/tfa', 'SonicWall SSL-VPN service enumeration'],
+    ['/owa/auth/logon.aspx', 'Microsoft Exchange/OWA service enumeration'],
+    ['/dana-na/nc/nc_gina_ver.txt', 'Ivanti/Pulse Secure VPN service enumeration'],
+    ['/wsman', 'Windows remote-management service enumeration'],
+  ]) {
+    const value = normalizeAudit(audit({
+      request: { hostname: '75.178.84.162', method: 'GET', uri },
+      response: { http_code: 200 },
+      messages: [{ message: 'Host header is a numeric IP address', details: {
+        ruleId: '920350', severity: '4', tags: ['platform-multi'],
+      } }],
+    }));
+    assert.equal(value.category, 'service_enumeration');
+    assert.equal(value.severity, 'warning');
+    assert.equal(value.edge.behaviorSummary, summary);
+    assert.equal(value.edge.disposition, 'edge_rejected');
+    assert.equal(value.edge.originReached, false);
+  }
+});
+
+test('sensitive and framework paths override generic protocol classification', () => {
+  for (const [uri, category, severity] of [
+    ['/credentials.ini', 'sensitive_file_enumeration', 'critical'],
+    ['/backup.sql', 'backup_file_probe', 'warning'],
+    ['/actuator/env', 'framework_admin_probe', 'warning'],
+  ]) {
+    const value = normalizeAudit(audit({
+      request: { hostname: '75.178.84.162', method: 'GET', uri },
+      response: { http_code: 200 },
+      messages: [{ message: 'Host header is a numeric IP address', details: {
+        ruleId: '920350', severity: '4', tags: ['platform-multi'],
+      } }],
+    }));
+    assert.equal(value.category, category);
+    assert.equal(value.severity, severity);
+    assert.ok(value.edge.behaviorSummary);
+  }
 });
 
 test('ingestion rejects telemetry that claims an unverified transaction has a verified status', () => {
@@ -120,12 +177,14 @@ test('collector and ingestor persist, deduplicate, and expose WAF status', () =>
     assert.equal(events[0].edge.mode, 'DetectionOnly');
     assert.equal(events[0].http.statusSource, 'modsecurity_audit');
     assert.equal(events[0].edge.statusVerified, false);
+    assert.equal(events[0].edge.disposition, 'outcome_unknown');
+    assert.equal(events[0].edge.originReached, null);
     assert.equal(security.list({ stream: 'application' }).length, 0);
     assert.equal(security.list({ stream: 'waf' }).length, 1);
     // Keep this historical ingestion fixture independent of the wall clock;
     // the product default intentionally shows only the most recent 24 hours.
     assert.deepEqual(security.summary({ since: '2026-09-23T00:00:00.000Z' }).waf, {
-      total: 1, passed: 0, rejected: 1, rateLimited: 0, blocked: 0,
+      total: 1, passed: 0, rejected: 0, rateLimited: 0, blocked: 0, edgeRejected: 0, unknown: 1,
       ingestion: { ...ingestor.status() },
     });
     assert.equal(new WafIngestor(null, security, data, { mode: 'On' }).status().mode, 'On');

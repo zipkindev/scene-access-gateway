@@ -930,8 +930,8 @@ function wafDispositionLabel(disposition, mode = null, statusVerified = false) {
     origin_rejected: statusVerified ? 'Rejected before the origin' : 'WAF audit reported 4xx; final edge status unverified',
     origin_rate_limited: statusVerified ? 'Rate-limited before the origin' : 'WAF audit reported 429; final edge status unverified',
     waf_blocked: 'Blocked by WAF before the origin',
-    edge_rejected: 'Rejected at the edge',
-    outcome_unknown: 'Outcome could not be determined',
+    edge_rejected: 'Rejected by edge host policy before the application',
+    outcome_unknown: 'Final edge and application outcome unverified',
   };
   return labels[disposition] || readableSecurityValue(disposition);
 }
@@ -948,6 +948,9 @@ function wafOutcomeMeaning(event) {
   if (event.edge?.disposition === 'origin_rejected') return 'The origin rejected the request';
   if (event.edge?.disposition === 'origin_rate_limited') return 'The origin rate-limited the request';
   if (event.edge?.disposition === 'waf_blocked') return 'The request did not reach the origin';
+  if (event.edge?.disposition === 'edge_rejected') {
+    return 'The edge returned HTTP 444 without proxying; the application was not reached';
+  }
   return null;
 }
 
@@ -1048,6 +1051,10 @@ const securityClear = document.createElement('button');
 securityClear.type = 'button';
 securityClear.textContent = 'Clear filters';
 securityToolbar.insertBefore(securityClear, elements.securityRefresh);
+const securityExport = document.createElement('button');
+securityExport.type = 'button';
+securityExport.textContent = 'Export filtered CSV';
+securityToolbar.insertBefore(securityExport, elements.securityRefresh);
 const securityFilterChips = document.createElement('div');
 securityFilterChips.className = 'security-filter-chips';
 securityToolbar.after(securityFilterChips);
@@ -1744,6 +1751,7 @@ for (const [category, labelText] of [
   ['backup_file_probe', 'Backup-file probes'],
   ['framework_admin_probe', 'Framework administration probes'],
   ['known_scanner', 'Known scanner signatures'],
+  ['service_enumeration', 'Remote-service enumeration'],
   ['protocol_anomaly', 'Protocol anomalies'],
 ]) {
   const label = document.createElement('label');
@@ -1969,12 +1977,19 @@ function securityEventRow(event) {
   }
   if (event.category) detail.append(' · ' + readableSecurityValue(event.category));
   if (event.http?.path) detail.append(' · ' + event.http.method + ' ' + event.http.path
-    + (event.http.status !== null ? (event.type === 'waf_finding' && event.edge?.statusVerified !== true
-      ? ' → WAF audit HTTP ' + event.http.status : ' → ' + event.http.status) : ''));
+    + (event.http.status !== null ? (event.type === 'waf_finding' && event.http.statusSource === 'edge_policy'
+      ? ' → Edge HTTP ' + event.http.status
+      : event.type === 'waf_finding' && event.edge?.statusVerified !== true
+        ? ' → WAF audit HTTP ' + event.http.status : ' → HTTP ' + event.http.status) : '')
+    + (Number.isInteger(event.http.auditStatus)
+      ? ' · audit phase HTTP ' + event.http.auditStatus + ' (not final)' : ''));
   if (event.edge) detail.append(' · target ' + (event.edge.target || 'unknown')
     + ' · ' + wafDispositionLabel(event.edge.disposition, event.edge.mode, event.edge.statusVerified)
     + (event.edge.ruleIds?.length ? ' · matched CRS ' + event.edge.ruleIds.join(', ') : '')
     + (event.edge.ruleSummary ? ' · ' + event.edge.ruleSummary : '')
+    + (event.edge.behaviorSummary ? ' · behavior: ' + event.edge.behaviorSummary : '')
+    + (event.edge.originReached === false ? ' · origin not reached'
+      : event.edge.originReached === true ? ' · origin reached' : ' · origin reach unverified')
     + (event.edge.anomalyScore !== null ? ' · score ' + event.edge.anomalyScore : '')
     + (event.edge.historical ? ' · historical import' : ''));
   const meaning = event.type === 'waf_finding' ? wafOutcomeMeaning(event) : null;
@@ -1991,6 +2006,29 @@ function securityEventParameters(before = null) {
     for (const value of values.keys()) parameters.append(kind, value);
   }
   return parameters;
+}
+
+async function exportSecurityCsv() {
+  securityExport.disabled = true;
+  elements.securityStatus.textContent = 'Preparing filtered CSV export…';
+  try {
+    const parameters = securityEventParameters();
+    parameters.delete('limit');
+    const response = await fetch('/api/security/events.csv?' + parameters, { cache: 'no-store' });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.error || 'Filtered security export is unavailable');
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(await response.blob());
+    link.download = 'scene-access-security-events-' + new Date().toISOString().replace(/[:.]/g, '-') + '.csv';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 0);
+    const count = Number(response.headers.get('X-Event-Count'));
+    elements.securityStatus.textContent = 'Exported ' + (Number.isInteger(count) ? count : 'the matching')
+      + ' filtered event' + (count === 1 ? '' : 's') + '.';
+  } catch (error) { elements.securityStatus.textContent = error.message; }
+  finally { securityExport.disabled = false; }
 }
 
 function renderSecurityEventPage(result, append = false) {
@@ -2045,10 +2083,9 @@ async function loadSecurity() {
       securityMetric(summary.critical, 'critical signals'),
       securityMetric(summary.integrityFailures, 'integrity failures'),
       securityMetric(summary.waf?.total || 0, 'WAF findings'),
-      securityMetric(summary.waf?.passed || 0, 'WAF audit-reported 2xx/3xx'),
-      securityMetric(summary.waf?.rejected || 0, 'WAF audit-reported 4xx'),
-      securityMetric(summary.waf?.rateLimited || 0, 'WAF audit-reported 429'),
+      securityMetric(summary.waf?.edgeRejected || 0, 'edge policy rejected · origin not reached'),
       securityMetric(summary.waf?.blocked || 0, 'WAF blocked'),
+      securityMetric(summary.waf?.unknown || 0, 'observed · final outcome unverified'),
     );
     renderSecurityEventPage(result);
     const geo = summary.geoip;
@@ -2081,6 +2118,7 @@ elements.securityLoadOlder.addEventListener('click', async () => {
   finally { elements.securityLoadOlder.disabled = false; }
 });
 elements.securityRefresh.addEventListener('click', loadSecurity);
+securityExport.addEventListener('click', exportSecurityCsv);
 elements.securityPanel.addEventListener('toggle', () => {
   elements.workspace.classList.toggle('security-mode', elements.securityPanel.open);
   elements.securityMap.hidden = !elements.securityPanel.open;

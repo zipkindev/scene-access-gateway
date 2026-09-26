@@ -4,7 +4,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
-const { findingCategory, findingSeverity, messageCategory, ruleSummary } = require('./waf-rules');
+const { defaultHostRejection, findingCategory, findingSeverity, messageCategory, ruleSummary,
+  pathFinding, serviceEnumeration } = require('./waf-rules');
 
 const CORRELATION_RULES = new Set(['949110', '980130']);
 
@@ -34,32 +35,41 @@ function normalizeAudit(value, observedAt = new Date(), historical = false) {
   const messages = Array.isArray(transaction.messages) ? transaction.messages : [];
   const actionable = messages.filter((message) => !CORRELATION_RULES.has(String(message?.details?.ruleId || '')));
   if (!actionable.length) return null;
-  const category = findingCategory(actionable);
   const request = transaction.request && typeof transaction.request === 'object' ? transaction.request : {};
   const response = transaction.response && typeof transaction.response === 'object' ? transaction.response : {};
-  const status = Number.isInteger(response.http_code) ? response.http_code : null;
+  const auditStatus = Number.isInteger(response.http_code) ? response.http_code : null;
   const interrupted = transaction.is_interrupted === true;
-  const disposition = interrupted ? 'waf_blocked'
-    : status === 429 ? 'origin_rate_limited'
-      : status >= 400 && status < 500 ? 'origin_rejected'
-        : status >= 200 && status < 400 ? 'observed_passed' : 'outcome_unknown';
-  const severity = findingSeverity(actionable, category);
   const scores = messages.map((message) => /Total Score:\s*(\d+)/i.exec(String(message?.message || '')))
     .filter(Boolean).map((match) => Number(match[1])).filter(Number.isInteger);
   const sourceIp = net.isIP(transaction.client_ip) ? transaction.client_ip : 'unknown';
   const target = /^[A-Za-z0-9.-]{1,253}$/.test(request.hostname || '') ? request.hostname.toLowerCase() : null;
+  const pathname = safePath(request.uri);
   const at = Number.isFinite(Date.parse(transaction.time_stamp || ''))
     ? new Date(transaction.time_stamp).toISOString() : observedAt.toISOString();
   const ruleIds = [...new Set(actionable.map((message) => String(message?.details?.ruleId || ''))
     .filter((rule) => /^\d{1,10}$/.test(rule)))];
+  const edgeRejected = defaultHostRejection(target, ruleIds);
+  const behaviorSummary = serviceEnumeration(pathname, target, ruleIds);
+  const pathMatch = pathFinding(pathname);
+  const category = behaviorSummary ? 'service_enumeration'
+    : pathMatch?.category || findingCategory(actionable);
+  const severity = behaviorSummary ? 'warning'
+    : pathMatch?.severity || findingSeverity(actionable, category);
+  const disposition = interrupted ? 'waf_blocked' : edgeRejected ? 'edge_rejected' : 'outcome_unknown';
+  const status = edgeRejected ? 444 : auditStatus;
   const uniqueId = safeTransactionId(transaction.unique_id);
   return {
     version: 1, source: 'waf', transactionId: uniqueId, at,
     severity, category, outcome: disposition, sourceIp,
-    http: { method: String(request.method || '').slice(0, 12), path: safePath(request.uri), status,
-      statusSource: 'modsecurity_audit' },
-    edge: { target, disposition, ruleIds, ruleSummary: ruleSummary(ruleIds), anomalyScore: scores.length ? Math.max(...scores) : null,
-      interrupted, statusVerified: interrupted, transactionId: uniqueId, historical: historical === true },
+    http: { method: String(request.method || '').slice(0, 12), path: pathname, status,
+      statusSource: edgeRejected ? 'edge_policy' : 'modsecurity_audit',
+      auditStatus: edgeRejected ? auditStatus : null },
+    edge: { target, disposition, ruleIds, ruleSummary: ruleSummary(ruleIds),
+      behaviorSummary: behaviorSummary || pathMatch?.summary || null,
+      anomalyScore: scores.length ? Math.max(...scores) : null,
+      interrupted, statusVerified: interrupted || edgeRejected,
+      originReached: interrupted || edgeRejected ? false : null, transactionId: uniqueId,
+      historical: historical === true },
   };
 }
 

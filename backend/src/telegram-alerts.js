@@ -9,10 +9,10 @@ const CATEGORIES = new Set([
   'sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
   'automated_scanner_probe', 'unexpected_http_method', 'invalid_content_length',
   'sensitive_file_enumeration', 'backup_file_probe', 'framework_admin_probe',
-  'known_scanner', 'protocol_anomaly', 'rate_limiting', 'integrity_failure',
+  'known_scanner', 'service_enumeration', 'protocol_anomaly', 'rate_limiting', 'integrity_failure',
 ]);
 const DEFAULT_POLICY = Object.freeze({
-  version: 2,
+  version: 3,
   enabled: false,
   minimumSeverity: 'critical',
   categories: ['sql_injection_probe', 'command_injection_probe', 'path_traversal_probe',
@@ -79,7 +79,11 @@ function validatePolicy(value) {
       categories.push('protocol_anomaly');
     }
   }
-  const policy = { ...DEFAULT_POLICY, ...value, categories, version: 2 };
+  if (value.version <= 2 && Array.isArray(categories)
+    && (categories.includes('automated_scanner_probe') || categories.includes('known_scanner'))) {
+    categories.push('service_enumeration');
+  }
+  const policy = { ...DEFAULT_POLICY, ...value, categories, version: 3 };
   if (Array.isArray(policy.categories)) policy.categories = [...new Set(policy.categories)];
   if (typeof policy.enabled !== 'boolean' || !LEVELS.includes(policy.minimumSeverity)
     || !Array.isArray(policy.categories) || policy.categories.length > CATEGORIES.size
@@ -126,8 +130,8 @@ function dispositionLabel(disposition) {
     origin_rejected: 'audit-reported 4xx',
     origin_rate_limited: 'audit-reported 429',
     waf_blocked: 'WAF blocked',
-    edge_rejected: 'edge rejected',
-    outcome_unknown: 'outcome unknown',
+    edge_rejected: 'edge host policy rejected',
+    outcome_unknown: 'final outcome unverified',
   })[disposition] || String(disposition).replaceAll('_', ' ');
 }
 
@@ -141,8 +145,8 @@ function wafAction(event) {
   if (disposition === 'origin_rate_limited') return event.edge?.statusVerified
     ? 'Rate-limited before reaching the origin' : 'WAF audit reported 429; final edge status is unverified';
   if (disposition === 'waf_blocked') return 'Blocked by WAF before reaching the origin';
-  if (disposition === 'edge_rejected') return 'Rejected at the edge';
-  return 'Outcome could not be determined';
+  if (disposition === 'edge_rejected') return 'Rejected by edge host policy before proxying to the application';
+  return 'WAF observed the request; final edge and application outcome is unverified';
 }
 
 function wafMeaning(event) {
@@ -154,6 +158,7 @@ function wafMeaning(event) {
   if (disposition === 'origin_rejected') return 'The application or origin rejected the request.';
   if (disposition === 'origin_rate_limited') return 'The application or origin applied rate limiting.';
   if (disposition === 'waf_blocked') return 'The request did not reach the application origin.';
+  if (disposition === 'edge_rejected') return 'The edge returned HTTP 444 without proxying; the application was not reached.';
   return null;
 }
 
@@ -379,8 +384,11 @@ class TelegramAlerts {
     const waf = event.type === 'waf_finding' && event.edge;
     const request = waf && event.http?.path
       ? `Request: ${String(event.http.method || '').slice(0, 12)} ${String(event.http.path).slice(0, 512)}`
-        + (event.http.status !== null ? (event.edge.statusVerified === true
-          ? ` → HTTP ${event.http.status}` : ` → WAF audit HTTP ${event.http.status}`) : '') : null;
+        + (event.http.status !== null ? (event.http.statusSource === 'edge_policy'
+          ? ` → Edge HTTP ${event.http.status}` : event.edge.statusVerified === true
+            ? ` → HTTP ${event.http.status}` : ` → WAF audit HTTP ${event.http.status}`) : '') : null;
+    const auditPhase = waf && Number.isInteger(event.http?.auditStatus)
+      ? `Audit phase: HTTP ${event.http.auditStatus} (not the final client response)` : null;
     const matched = waf && event.edge.ruleIds?.length
       ? `Matched: CRS ${event.edge.ruleIds.join(', ')}`
         + (event.edge.ruleSummary ? ` · ${event.edge.ruleSummary}` : '') : null;
@@ -392,7 +400,9 @@ class TelegramAlerts {
       `Source: ${source}`,
       `Target: ${target}`,
       request,
+      auditPhase,
       matched,
+      waf && event.edge.behaviorSummary ? `Behavior: ${event.edge.behaviorSummary}` : null,
       waf ? `WAF action: ${wafAction(event)}` : dispositionSummary ? `Results: ${dispositionSummary}` : null,
       waf ? `Incident results: ${dispositionSummary}` : null,
       waf ? `Meaning: ${wafMeaning(event)}` : event.outcome ? `Outcome: ${String(event.outcome).slice(0, 80)}` : null,

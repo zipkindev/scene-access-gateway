@@ -108,6 +108,11 @@ content.
 
 ModSecurity's JSON audit response code is evidence from the audit stream, not
 automatically the final edge response. The normalized record carries that
-provenance, the UI and Telegram label it `WAF audit HTTP`, and only an actual
-WAF interruption is status-verified. Investigations correlate non-interrupted
-findings with the origin/edge access log before changing application behavior.
+provenance, and the UI and Telegram label it `WAF audit HTTP`. An actual WAF
+interruption is status-verified as `waf_blocked`. The configured default virtual
+host is another deterministic final outcome: numeric-host traffic matching CRS
+920350 is returned as Edge HTTP 444 before proxying and is marked
+`edge_rejected`, with origin reachability explicitly false. Other
+non-interrupted findings remain unverified until they are correlated with the
+origin/edge access log. This keeps WAF detection, edge enforcement, and
+application reachability as separate architectural facts.

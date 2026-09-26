@@ -269,7 +269,8 @@ When WAF telemetry is configured, Scene Management also displays normalized
 CRS findings and whether ModSecurity interrupted the transaction. A response
 code taken from the ModSecurity JSON audit is explicitly labeled `WAF audit
 HTTP`; it is not treated as the final client response unless the WAF itself
-interrupted the request. For non-interrupted requests, correlate the WAF
+interrupted the request or a deterministic edge policy supplies the final
+result. For other non-interrupted requests, correlate the WAF
 transaction/request ID and time with the origin edge access record before
 concluding that the origin returned `2xx`, `4xx`, or `429`. This prevents an
 audit `200` from creating a false success signal when the edge actually
@@ -282,6 +283,33 @@ incidents are keyed by source
 fingerprint, target, and attack category. The first qualifying event alerts
 immediately, duplicates accumulate, and ongoing activity re-alerts at the
 configured persistence interval. A quiet interval closes the active incident.
+
+The deployed WAF has a deterministic exception to the correlation rule: its
+TLS default server returns HTTP 444 for an unrecognized or numeric Host before
+proxying. CRS 920350 plus a numeric target is therefore presented as a verified
+`edge_rejected` outcome with `originReached: false`; the ModSecurity audit-phase
+code remains visible as non-final evidence. This is edge host-policy
+enforcement, not a DetectionOnly CRS block. A true CRS interruption is shown
+separately as `waf_blocked`. All other non-interrupted findings are
+`outcome_unknown` until a final access record establishes whether the origin
+was reached.
+
+Recognized remote-access product paths are categorized as
+`service_enumeration` and enriched with the probed family (RDP Web,
+Exchange/OWA, SonicWall, Ivanti/Pulse Secure, Windows remote management, or a
+VPN gateway). Repetition across product-identification paths is enumeration,
+not brute force, unless authentication submissions or credential attempts are
+also observed. Sensitive-file, backup-file, and framework-administration paths
+remain distinct so the later hardening review can separate edge noise from
+requests that may require application controls.
+
+`Export filtered CSV` uses the selected time range and all active stream,
+severity, event, category, location, source, method, status, and disposition
+filters. It exports every matching retained event rather than only the visible
+250 rows. The CSV contains sanitized ledger data and splits final HTTP status,
+status provenance, audit-phase HTTP status, WAF disposition, origin
+reachability, rules, and behavior into separate columns. It does not add raw
+headers, query values, cookies, request bodies, authorization data, or secrets.
 
 The event ledger remains authoritative. A notification is queued only after
 its security event has been durably appended. Delivery uses a bounded persisted
