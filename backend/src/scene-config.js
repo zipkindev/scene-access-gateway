@@ -80,13 +80,16 @@ function validateScene(input, backgrounds = BACKGROUNDS, allowedDestinations = [
   if (scene.motion === undefined) scene.motion = { enabled: false, effects: {} };
   if (scene.interaction === undefined) scene.interaction = { kind: 'none' };
   if (scene.display === undefined) scene.display = { title: 'ZArcade' };
-  exactKeys(scene, ['schemaVersion', 'sceneId', 'backgroundId', 'viewport', 'publicText', 'hotspots', 'motion', 'interaction', 'display'], 'scene');
+  if (scene.diagnostics === undefined) scene.diagnostics = { clickDebugger: false };
+  exactKeys(scene, ['schemaVersion', 'sceneId', 'backgroundId', 'viewport', 'publicText', 'hotspots', 'motion', 'interaction', 'display', 'diagnostics'], 'scene');
   if (scene.schemaVersion !== 1) throw new Error('unsupported scene schema');
   if (!ID.test(scene.sceneId || '')) throw new Error('invalid scene ID');
   if (!Object.hasOwn(backgrounds, scene.backgroundId)) throw new Error('unknown background');
   if (scene.publicText !== false) throw new Error('public scene text must remain disabled');
   exactKeys(scene.display, ['title'], 'display');
   if (typeof scene.display.title !== 'string' || scene.display.title.length < 1 || scene.display.title.length > 60 || scene.display.title !== scene.display.title.trim() || /[\u0000-\u001f\u007f]/.test(scene.display.title)) throw new Error('invalid browser tab title');
+  exactKeys(scene.diagnostics, ['clickDebugger'], 'diagnostics');
+  if (typeof scene.diagnostics.clickDebugger !== 'boolean') throw new Error('invalid click debugger state');
   exactKeys(scene.interaction, ['kind'], 'interaction');
   if (!['none', 'minesweeper'].includes(scene.interaction.kind)) throw new Error('unsupported interaction');
   if (scene.interaction.kind === 'minesweeper' && !gameCompatibleBackground(backgrounds, scene.backgroundId)) {
@@ -249,7 +252,8 @@ class SceneStore {
       // Treat their implicit defaults as the same scene when listing history.
       const scene = { ...record.scene,
         interaction: record.scene.interaction ?? { kind: 'none' },
-        motion: record.scene.motion ?? { enabled: false, effects: {} } };
+        motion: record.scene.motion ?? { enabled: false, effects: {} },
+        diagnostics: record.scene.diagnostics ?? { clickDebugger: false } };
       if (seen.some((prior) => isDeepStrictEqual(prior, scene))) return false;
       seen.push(scene);
       return true;

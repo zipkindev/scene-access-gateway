@@ -26,5 +26,8 @@
   ],
   "display": {
     "title": "ZArcade"
+  },
+  "diagnostics": {
+    "clickDebugger": false
   }
 }

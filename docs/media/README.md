@@ -8,7 +8,11 @@ the repository's real frontend and backend containers.
 - `qr-sequence-activation.gif` shows that sequence revealing a real local QR
   challenge. The pointer and progress label are capture-only overlays.
 - `scene-management-security.png` shows locally generated demonstration events
-  using the RFC-reserved documentation address `203.0.113.42`.
+  and the interactive connection globe using RFC-reserved documentation
+  addresses.
+- `scene-management-source-intelligence.png` shows the real passive
+  source-investigation view populated from a bounded fixture with RFC-reserved
+  sources, documentation-only ownership, DNS, routing, and evidence data.
 
 The temporary QR pointed to `localhost` and its backing volume was destroyed
 after capture. No production hostname, token, account, email address, visitor

@@ -10,6 +10,7 @@ mkdir -p "$(dirname -- "$output_path")"
 docker image save \
   --output "$output_path" \
   "$image_namespace/frontend:$image_tag" \
-  "$image_namespace/backend:$image_tag"
+  "$image_namespace/backend:$image_tag" \
+  "$image_namespace/waf:$image_tag"
 
 sha256sum "$output_path"

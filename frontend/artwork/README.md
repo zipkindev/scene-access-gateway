@@ -41,3 +41,9 @@ From the Gateway repository root, run `./scripts/verify-build-inputs.sh` after
 changing a manifest or asset. Run `./scripts/package-scene-assets.sh` when
 reviewing the deterministic public asset bundle. Never add a file whose origin
 or redistribution terms are unresolved.
+
+Documentation screenshots and demonstrations are intentionally separate under
+`docs/media/`. Current captures show the real Scene Management editor,
+security globe, passive source-intelligence view, and QR sequence using only
+disposable fixture state and RFC-reserved addresses; they are not runtime
+artwork and are not included in scene asset manifests.

@@ -8,6 +8,7 @@ services:
   backend:
     environment:
       PUBLIC_ORIGIN: ${SAG_PUBLIC_ORIGIN:?Set the public portal origin}
+      PUBLIC_HOST_ALIASES: ${SAG_PUBLIC_HOST_ALIASES:-}
       ADMIN_ORIGIN: ${SAG_EDITOR_ORIGIN:?Set the private editor origin}
       FIREWALL_ORIGIN: ${SAG_FIREWALL_ORIGIN:?Set the firewall gateway origin}
       FIREWALL_UPSTREAM: ${SAG_FIREWALL_UPSTREAM:?Set the protected firewall upstream}
@@ -18,6 +19,10 @@ services:
       TORRENTHARBOR_TLS_NAME: ${SAG_TORRENTHARBOR_TLS_NAME:?Set the application TLS name}
       MANAGEMENT_SOURCE_IP: ${SAG_MANAGEMENT_SOURCE_IP:?Set the trusted management source}
       PORTAL_OWNER_USERNAME: ${SAG_PORTAL_OWNER_USERNAME:?Set the portal owner username}
+      WAF_EVENT_INPUT_PATH: /run/waf-telemetry/events.jsonl
+      WAF_MODE: ${SAG_WAF_MODE:-DetectionOnly}
+    volumes:
+      - ${SAG_WAF_TELEMETRY_DIR:?Set the protected normalized WAF telemetry directory}:/run/waf-telemetry:ro
     secrets:
       - smtp-env
       - authentik-api-token

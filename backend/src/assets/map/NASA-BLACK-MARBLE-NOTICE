@@ -1,0 +1,9 @@
+NASA Earth Observatory Black Marble 2016 city-light data
+
+Source: https://science.nasa.gov/earth/earth-observatory/earth-at-night/maps/
+Derived from the 3600 x 1800 (0.1 degree) 2016 color global JPEG.
+NASA Earth Observatory image by Joshua Stevens, using Suomi NPP VIIRS data
+from Miguel Roman, NASA Goddard Space Flight Center.
+
+The bundled nasa-city-lights.json is a downsampled set of illuminated pixels
+used only to render the night side of the Security Monitoring globe.

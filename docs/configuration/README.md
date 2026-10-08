@@ -3,9 +3,15 @@
 Copy `.env.example` to `.env` with `scripts/bootstrap.sh`, then review every
 value. The `.env` file is ignored by Git.
 
-The base `compose.yaml` starts only the frontend and backend. It uses a named
-volume for portal state and does not require credentials merely to display the
-local portal and editor.
+The base `compose.yaml` starts the frontend, backend, and isolated
+source-intelligence worker. It uses a named volume for portal state and does
+not require external credentials merely to display the local portal and
+editor. The worker is unexposed, uses a dedicated authentication secret, and
+keeps active investigation disabled by default.
+Portable Compose keeps `.local/secrets/` mode `0700` and presents this one
+machine-to-machine token as a read-only mode-`0444` Compose secret so host and
+container user IDs do not need to match. Other credential files remain mode
+`0600`.
 
 ## Configuration ownership
 
@@ -47,6 +53,48 @@ City and ASN databases in `SAG_GEOIP_DIR` and use `compose.geoip.yaml` instead.
 
 See [security monitoring](../security-monitoring.md) for the trusted-proxy
 requirement, privacy limits, and public-exposure checklist.
+
+Application routing and exceptions are inventoried in
+`deploy/applications.json`; environment-specific values remain in `.env` or an
+ignored deployment overlay. Update the contract and pass
+`scripts/check-application-contracts.js` before adding proxy routes, Authentik
+groups, QR destinations, CSP sources, cookies, or WAF exclusions.
+Browser-facing origins use standard HTTPS without an internal listener port.
+NAT destinations and private WAF/proxy listener ports belong only in the
+protected deployment overlay and must never be emitted in QR actions,
+redirects, CSP `form-action`, forwarded public hosts, or rewritten locations.
+
+`SAG_SOURCE_INTELLIGENCE_ACTIVE_ENABLED` defaults to `false`. Passive source
+investigations still combine the local event ledger and GeoLite data with
+RDAP, reverse-DNS, and routing evidence through the isolated, unexposed helper.
+Enabling the setting permits only the fixed, explicitly confirmed ethical-
+reconnaissance profile documented in [security monitoring](../security-monitoring.md).
+
+`SAG_MANAGEMENT_SOURCE_IP` identifies the direct TCP peer allowed to use the
+TorrentHarbor management API on the private backend network. Public Nginx
+denies that route and removes caller-supplied management source headers. Do not
+set this value to a shared public reverse proxy address or publish the backend
+port.
+
+`SAG_PUBLIC_HOST_ALIASES` is a comma-separated list of additional public DNS
+hostnames served by the same portal, such as `arcade.example.com`. The backend
+accepts the canonical `SAG_PUBLIC_ORIGIN` hostname and only these explicit
+aliases, with either the canonical origin port or the default external port.
+Do not use wildcards or include schemes, paths, or ports in the alias list.
+
+Production TLS/WAF configuration must preserve normalized access logging,
+secret-probe and management-route denials, source-header replacement, request
+timeouts, compression, and rate limits. Keep new WAF policies in observation
+mode during representative validation. Configure HSTS at TLS termination with
+a short initial lifetime before considering broader coverage.
+
+For WAF monitoring, provide a protected `SAG_WAF_TELEMETRY_DIR` to the
+networkless collector, mount that directory read-only into the backend, and
+set `WAF_EVENT_INPUT_PATH=/run/waf-telemetry/events.jsonl`. The normalized feed
+is size-bounded and excludes headers, bodies, query values, credentials, and
+uploads. Scene Management displays the configured WAF mode as read-only
+deployment state; it controls monitoring and notification policy, not CRS
+enforcement.
 
 ## Telegram security alerts
 

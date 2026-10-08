@@ -45,10 +45,15 @@ class GeoIpLookup {
     const asn = this.asn?.get(ip) || {};
     const country = city.country?.iso_code || city.registered_country?.iso_code || null;
     const subdivisions = Array.isArray(city.subdivisions) ? city.subdivisions : [];
+    const latitude = Number.isFinite(city.location?.latitude) && city.location.latitude >= -90
+      && city.location.latitude <= 90 ? city.location.latitude : null;
+    const longitude = Number.isFinite(city.location?.longitude) && city.location.longitude >= -180
+      && city.location.longitude <= 180 ? city.location.longitude : null;
     return {
       scope: 'public', country,
       region: subdivisions[0]?.iso_code || null,
       city: city.city?.names?.en || null,
+      latitude, longitude,
       accuracyRadiusKm: Number.isFinite(city.location?.accuracy_radius) ? city.location.accuracy_radius : null,
       asn: Number.isInteger(asn.autonomous_system_number) ? asn.autonomous_system_number : null,
       organization: typeof asn.autonomous_system_organization === 'string'

@@ -1,0 +1,19 @@
+NASA Blue Marble day surface and Black Marble 2016 night lights
+
+Day source:
+https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-base/february/world.200402.3x5400x2700.jpg
+NASA Earth Observatory Blue Marble: Next Generation February global base map,
+based on Terra MODIS observations. Source size: 5400 x 2700.
+
+Night source:
+https://assets.science.nasa.gov/content/dam/science/esd/eo/images/imagerecords/144000/144897/BlackMarble_2016_3km_gray.jpg
+NASA Earth Observatory image by Joshua Stevens, using Suomi NPP VIIRS data
+from Miguel Roman, NASA Goddard Space Flight Center. Source size:
+13500 x 6750.
+
+The two bundled WebP files are Lanczos-resampled to a power-of-two
+4096 x 2048 resolution and encoded at WebP quality 90. This preserves WebGL 1
+longitude wrapping, materially improves close regional views, and avoids the
+GPU-memory cost of decoding the non-power-of-two masters at runtime. The
+browser blends both local textures at the astronomical day/night terminator;
+it does not contact NASA at runtime.

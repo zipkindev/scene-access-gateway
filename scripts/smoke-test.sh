@@ -39,14 +39,31 @@ case "$probe_request_id" in
   *) echo "probe response did not contain a request UUID" >&2; exit 1 ;;
 esac
 curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/summary" | grep -q '"retentionDays":'
+curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/map" | grep -q '"sources":'
 curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/maxmind" | grep -q '"mode":"scene-management"'
 security_events=$(curl -fsS "http://127.0.0.1:$smoke_editor_port/api/security/events?limit=20")
-printf '%s\n' "$security_events" | grep -q 'automated_scanner_probe'
+printf '%s\n' "$security_events" | grep -q 'framework_admin_probe'
 printf '%s\n' "$security_events" | grep -q '"status":404'
 printf '%s\n' "$security_events" | grep -q "\"requestId\":\"$probe_request_id\""
 frontend_logs=$(docker compose -p "$smoke_project" -f "$repository_root/compose.yaml" logs --no-color --no-log-prefix frontend)
 printf '%s\n' "$frontend_logs" | grep -q "\"backend_request_id\":\"$probe_request_id\""
-printf '%s\n' "$frontend_logs" | grep -q '"request_uri":"/wp-login.php"'
+printf '%s\n' "$frontend_logs" | grep -q '"route":"/wp-login.php"'
+if printf '%s\n' "$frontend_logs" | grep -q '"request_uri":'; then
+  echo "frontend logs exposed the raw request URI" >&2
+  exit 1
+fi
+
+test "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$smoke_port/.env")" = 404
+test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'X-Management-Source-IP: 127.0.0.1' "http://127.0.0.1:$smoke_port/internal/torrentharbor-management/status")" = 404
+test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: attacker.invalid' "http://127.0.0.1:$smoke_port/")" = 421
+test "$(curl -sS -o /dev/null -w '%{http_code}' -X TRACE "http://127.0.0.1:$smoke_port/")" = 405
+
+versioned_headers=$(curl -sS -D - -o /dev/null "http://127.0.0.1:$smoke_port/scene-framing.js?v=23")
+printf '%s\n' "$versioned_headers" | grep -qi '^cache-control: public, max-age=31536000, immutable'
+printf '%s\n' "$versioned_headers" | grep -qi '^permissions-policy:'
+printf '%s\n' "$versioned_headers" | grep -qi '^strict-transport-security: max-age=86400'
+compressed_headers=$(curl -sS -H 'Accept-Encoding: gzip' -D - -o /dev/null "http://127.0.0.1:$smoke_port/scene-framing.js?v=23")
+printf '%s\n' "$compressed_headers" | grep -qi '^content-encoding: gzip'
 
 rate_limited=false
 attempt=0

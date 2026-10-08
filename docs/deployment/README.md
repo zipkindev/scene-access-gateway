@@ -46,6 +46,31 @@ Compose override. Real hostnames, addresses, TLS paths, authentication files,
 storage mappings, and network policy remain local. A guarded TrueNAS cutover
 remains separate from source synchronization.
 
+## Hardened rollout order
+
+Before creating a target overlay for a new application, add and validate its
+entry in `deploy/applications.json`. Implement only the exact host/path,
+upstream/TLS identity, cookie, CSP, Authentik, QR, and WAF behavior declared
+there. Any WAF exclusion requires exact rule IDs, path, methods, rationale, and
+review date. The rollout must exercise every declared journey so later
+hardening cannot silently break an exception-worthy function.
+
+For an internet-facing update, retain the WAF in observation mode, back up the
+portal data volume, retain the previous frontend/backend image IDs under
+rollback tags, validate the merged Compose model, and build the exact source
+commit. Start the replacement with Compose and require healthy containers
+before testing the public portal, a versioned asset, Scene Management, a
+controlled probe, management-path denial, structured-log redaction, and any
+configured Telegram test delivery. Roll back both images and restore the data
+volume only if the application changed persistent data incompatibly.
+
+TLS termination must preserve the portable one-day HSTS starter policy and,
+after a successful short-duration trial, may lengthen it. It must preserve the
+portable configuration's normalized logs, trusted-client-IP replacement,
+probe denials, connection/body timeouts, rate limits, compression, and public
+management-path denial. Do not copy hostnames, certificates, WAF credentials,
+or other deployment state into an image.
+
 No deployment mode changes source-control ownership: images remain portable,
 while secrets, hostnames, certificates, storage, and network policy are mounted
 or supplied by the target environment.
