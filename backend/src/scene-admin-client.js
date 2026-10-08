@@ -922,13 +922,14 @@ function readableSecurityValue(value) {
   return String(value).replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function wafDispositionLabel(disposition, mode = null, statusVerified = false) {
+function wafDispositionLabel(disposition, mode = null, statusVerified = false, status = null) {
   const labels = {
     observed_passed: statusVerified
-      ? 'Origin returned final 2xx/3xx'
+      ? Number.isInteger(status) ? `Request completed with final HTTP ${status}` : 'Request completed with final 2xx/3xx'
       : mode === 'DetectionOnly' ? 'Observed only (DetectionOnly; audit reported 2xx/3xx)'
         : 'Observed only (WAF audit reported 2xx/3xx)',
-    origin_rejected: statusVerified ? 'Origin returned final 4xx' : 'WAF audit reported 4xx; final edge status unverified',
+    origin_rejected: statusVerified && Number.isInteger(status) ? `Origin rejected request with final HTTP ${status}`
+      : statusVerified ? 'Origin rejected request with final 4xx' : 'WAF audit reported 4xx; final edge status unverified',
     origin_rate_limited: statusVerified ? 'Origin returned final HTTP 429' : 'WAF audit reported 429; final edge status unverified',
     origin_error: statusVerified ? 'Origin returned final 5xx' : 'WAF audit reported 5xx; final edge status unverified',
     waf_blocked: 'Blocked by WAF before the origin',
@@ -946,9 +947,16 @@ function wafOutcomeMeaning(event) {
       : 'Exact final-response evidence is unavailable';
   }
   if (event.edge?.disposition === 'observed_passed') {
-    return null;
+    if (event.http?.status >= 300) return 'The origin redirected the request; the requested path was not served in this response';
+    if (event.severity === 'critical') return 'The application returned content, but the security signature describes the request input—not proof that the detected action succeeded';
+    return 'The request completed normally; the security finding describes the inspected request characteristic';
   }
-  if (event.edge?.disposition === 'origin_rejected') return 'The origin rejected the request';
+  if (event.edge?.disposition === 'origin_rejected') {
+    if (event.http?.status === 404) return 'The requested resource was not present';
+    if (event.http?.status === 405) return 'The request method was not allowed';
+    if (event.http?.status === 413) return 'The request body was rejected as too large';
+    return 'The origin rejected the request';
+  }
   if (event.edge?.disposition === 'origin_rate_limited') return 'The origin rate-limited the request';
   if (event.edge?.disposition === 'origin_error') return 'The origin returned a server error';
   if (event.edge?.disposition === 'waf_blocked') return 'The request did not reach the origin';
@@ -1993,8 +2001,10 @@ function securityEventRow(event) {
     + (Number.isInteger(event.http.auditStatus)
       ? ' · audit phase HTTP ' + event.http.auditStatus + ' (not final)' : ''));
   if (event.edge) detail.append(' · target ' + (event.edge.target || 'unknown')
-    + ' · ' + wafDispositionLabel(event.edge.disposition, event.edge.mode, event.edge.statusVerified)
+    + ' · ' + wafDispositionLabel(event.edge.disposition, event.edge.mode, event.edge.statusVerified, event.http?.status)
     + (event.edge.ruleIds?.length ? ' · matched security rules ' + event.edge.ruleIds.join(', ') : '')
+    + (event.edge.ruleFamilies?.length ? ' · rule families: ' + event.edge.ruleFamilies.map(readableSecurityValue).join(', ') : '')
+    + (event.edge.matchLocations?.length ? ' · matched in: ' + event.edge.matchLocations.join(', ') : '')
     + (event.edge.ruleSummary ? ' · ' + event.edge.ruleSummary : '')
     + (event.edge.behaviorSummary ? ' · behavior: ' + event.edge.behaviorSummary : '')
     + (event.edge.originReached === false ? ' · origin not reached'

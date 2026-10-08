@@ -31,6 +31,7 @@ services:
       BACKEND: https://127.0.0.1:${SAG_ORIGIN_PORT:-44336}
       WAF_LISTEN_PORT: "${SAG_WAF_PORT:-44334}"
       WAF_SERVER_NAMES: ${SAG_WAF_SERVER_NAMES:?Set the reviewed public host allowlist}
+      WAF_RESTRICT_POST_ROOT_HOST_PATTERN: ${SAG_WAF_RESTRICT_POST_ROOT_HOST_PATTERN:-a^}
       SSL_CERT_FILE: /run/access-tls/fullchain.pem
       SSL_CERT_KEY_FILE: /run/access-tls/privkey.pem
       SERVER_HEADER: ""

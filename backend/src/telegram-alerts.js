@@ -13,11 +13,11 @@ const CATEGORIES = new Set([
   'rate_limiting', 'integrity_failure',
 ]);
 const DEFAULT_POLICY = Object.freeze({
-  version: 3,
+  version: 4,
   enabled: false,
   minimumSeverity: 'critical',
   categories: ['sql_injection_probe', 'command_injection_probe', 'cross_site_scripting_probe', 'path_traversal_probe',
-    'sensitive_file_enumeration', 'backup_file_probe', 'known_scanner', 'integrity_failure'],
+    'sensitive_file_enumeration', 'backup_file_probe', 'known_scanner', 'application_error_exposure', 'integrity_failure'],
   countThreshold: 1,
   aggregationWindowSeconds: 60,
   cooldownSeconds: 300,
@@ -84,7 +84,8 @@ function validatePolicy(value) {
     && (categories.includes('automated_scanner_probe') || categories.includes('known_scanner'))) {
     categories.push('service_enumeration');
   }
-  const policy = { ...DEFAULT_POLICY, ...value, categories, version: 3 };
+  if (value.version <= 3 && Array.isArray(categories)) categories.push('application_error_exposure');
+  const policy = { ...DEFAULT_POLICY, ...value, categories, version: 4 };
   if (Array.isArray(policy.categories)) policy.categories = [...new Set(policy.categories)];
   if (typeof policy.enabled !== 'boolean' || !LEVELS.includes(policy.minimumSeverity)
     || !Array.isArray(policy.categories) || policy.categories.length > CATEGORIES.size
@@ -140,15 +141,15 @@ function dispositionLabel(disposition) {
 function wafAction(event) {
   const disposition = event.edge?.disposition;
   if (disposition === 'observed_passed') return event.edge?.statusVerified
-    ? 'Origin returned a final 2xx/3xx response'
+    ? `Request completed with final HTTP ${event.http?.status ?? '2xx/3xx'}`
     : event.edge?.mode === 'DetectionOnly' ? 'Observed only (DetectionOnly); WAF did not interrupt the request'
       : 'Observed only; WAF did not interrupt the request';
   if (disposition === 'origin_rejected') return event.edge?.statusVerified
-    ? 'Origin returned a final 4xx response' : 'WAF audit reported a 4xx; final edge status is unverified';
+    ? `Origin rejected the request with final HTTP ${event.http?.status ?? '4xx'}` : 'WAF audit reported a 4xx; final edge status is unverified';
   if (disposition === 'origin_rate_limited') return event.edge?.statusVerified
     ? 'Origin returned a final HTTP 429 response' : 'WAF audit reported 429; final edge status is unverified';
   if (disposition === 'origin_error') return event.edge?.statusVerified
-    ? 'Origin returned a final 5xx response' : 'WAF audit reported 5xx; final edge status is unverified';
+    ? `Origin returned final HTTP ${event.http?.status ?? '5xx'}` : 'WAF audit reported 5xx; final edge status is unverified';
   if (disposition === 'waf_blocked') return 'Blocked by WAF before reaching the origin';
   if (disposition === 'edge_rejected') return 'Rejected by edge host policy before proxying to the application';
   return 'WAF observed the request; final edge and application outcome is unverified';
@@ -162,8 +163,17 @@ function wafMeaning(event) {
       ? `ModSecurity audit reported HTTP ${event.http.status}; exact final-response evidence is unavailable.`
       : 'Exact final-response evidence is unavailable.';
   }
-  if (disposition === 'observed_passed') return null;
-  if (disposition === 'origin_rejected') return 'The application or origin rejected the request.';
+  if (disposition === 'observed_passed') {
+    if (event.http?.status >= 300) return 'The origin redirected the request; the requested path was not served in this response.';
+    if (event.severity === 'critical') return 'The application returned content; the signature describes request input and does not prove the detected action succeeded.';
+    return 'The request completed normally; the finding describes the inspected request characteristic.';
+  }
+  if (disposition === 'origin_rejected') {
+    if (event.http?.status === 404) return 'The requested resource was not present.';
+    if (event.http?.status === 405) return 'The request method was not allowed.';
+    if (event.http?.status === 413) return 'The request body was rejected as too large.';
+    return 'The application or origin rejected the request.';
+  }
   if (disposition === 'origin_rate_limited') return 'The application or origin applied rate limiting.';
   if (disposition === 'origin_error') return 'The application or origin returned a server error.';
   if (disposition === 'waf_blocked') return 'The request did not reach the application origin.';
@@ -337,9 +347,11 @@ class TelegramAlerts {
     const credentials = this._credentials();
     const category = eventCategory(event);
     if (!credentials || !this.policy.enabled || !category || !this.policy.categories.includes(category)) return false;
-    if (LEVELS.indexOf(event.severity) < LEVELS.indexOf(this.policy.minimumSeverity)) return false;
+    const alertSeverity = event.type === 'waf_finding' && event.edge?.disposition === 'origin_error'
+      ? 'critical' : event.severity;
+    if (LEVELS.indexOf(alertSeverity) < LEVELS.indexOf(this.policy.minimumSeverity)) return false;
     const now = this.now();
-    if (quiet(this.policy, now) && !(event.severity === 'critical' && this.policy.criticalOverride)) return false;
+    if (quiet(this.policy, now) && !(alertSeverity === 'critical' && this.policy.criticalOverride)) return false;
     const fingerprint = crypto.createHash('sha256').update(String(event.source?.ip || 'unknown')).digest('hex').slice(0, 12);
     const target = String(event.edge?.target || event.destination || 'portal').slice(0, 253);
     const key = `${category}:${fingerprint}:${target}`;
@@ -355,11 +367,11 @@ class TelegramAlerts {
       incident.thresholdCount = 0;
     }
     incident.thresholdCount = Number(incident.thresholdCount || 0) + 1;
-    const escalated = LEVELS.indexOf(event.severity) > LEVELS.indexOf(incident.highestSeverity);
+    const escalated = LEVELS.indexOf(alertSeverity) > LEVELS.indexOf(incident.highestSeverity);
     incident.count += 1;
     incident.sinceAlert += 1;
     incident.lastSeenAt = now.getTime();
-    if (LEVELS.indexOf(event.severity) > LEVELS.indexOf(incident.highestSeverity)) incident.highestSeverity = event.severity;
+    if (LEVELS.indexOf(alertSeverity) > LEVELS.indexOf(incident.highestSeverity)) incident.highestSeverity = alertSeverity;
     const disposition = String(event.edge?.disposition || event.outcome || 'observed').slice(0, 80);
     incident.dispositions[disposition] = (incident.dispositions[disposition] || 0) + 1;
     this.incidents.set(key, incident);
@@ -404,7 +416,7 @@ class TelegramAlerts {
         + (event.edge.ruleSummary ? ` · ${event.edge.ruleSummary}` : '') : null;
     const text = [
       'Scene Access security alert',
-      `${String(event.severity || 'warning').toUpperCase()} · ${category.replaceAll('_', ' ')}`,
+      `${String(alertSeverity || 'warning').toUpperCase()} · ${category.replaceAll('_', ' ')}`,
       `Observed since last alert: ${incident.sinceAlert} · total: ${incident.count}`,
       `Time: ${event.at || now.toISOString()}`,
       `Source: ${source}`,
@@ -412,6 +424,8 @@ class TelegramAlerts {
       request,
       auditPhase,
       matched,
+      waf && event.edge.ruleFamilies?.length ? `Rule families: ${event.edge.ruleFamilies.join(', ')}` : null,
+      waf && event.edge.matchLocations?.length ? `Matched in: ${event.edge.matchLocations.join(', ')}` : null,
       waf && event.edge.behaviorSummary ? `Behavior: ${event.edge.behaviorSummary}` : null,
       waf ? `WAF action: ${wafAction(event)}` : dispositionSummary ? `Results: ${dispositionSummary}` : null,
       waf ? `Incident results: ${dispositionSummary}` : null,

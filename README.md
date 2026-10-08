@@ -236,6 +236,14 @@ flows. Enable high-confidence CRS protections incrementally only after that
 review; the mode remains deployment-controlled rather than changeable from the
 browser.
 
+The reviewed post-observation profile keeps the global engine in
+`DetectionOnly` but promotes only high-confidence traversal/LFI, RFI,
+command/RCE, SQL-injection, XSS, restricted-file, and backup-file transactions
+to CRS blocking. Telemetry reports this posture as `Selective`. Noisy generic
+scanner and protocol-format findings continue to be observed for tuning.
+Host-scoped root-method policy can return 405 before origin processing for a
+service whose `/` endpoint never accepts POST.
+
 Deployments that serve additional public names declare them explicitly with
 `SAG_PUBLIC_HOST_ALIASES`; for example, the arcade hostname can share the
 portal without becoming a wildcard trust rule. The backend accepts only the

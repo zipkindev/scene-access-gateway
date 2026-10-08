@@ -18,6 +18,8 @@ done
 
 grep -F 'server_name ${WAF_SERVER_NAMES};' "$waf_root/default.conf.template" >/dev/null
 grep -F 'location / { return 444; }' "$waf_root/default.conf.template" >/dev/null
+grep -F 'if ($reject_post_root) { return 405; }' "$waf_root/default.conf.template" >/dev/null
+grep -F 'REQUEST-948-SCENE-SELECTIVE-ENFORCEMENT.conf' "$waf_root/Dockerfile" >/dev/null
 
 if grep -E '(zipkin\.dev|192\.168\.|/mnt/)' "$waf_root"/*.yaml "$waf_root"/*.template >/dev/null; then
   echo 'WAF deployment source contains an environment-specific hostname, address, or path' >&2

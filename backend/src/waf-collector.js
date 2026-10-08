@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
-const { defaultHostRejection, findingCategory, findingSeverity, messageCategory, ruleSummary,
+const { CATEGORY_PRIORITY, defaultHostRejection, findingCategory, findingSeverity, messageCategory, ruleFamilies, ruleSummary,
   pathFinding, serviceEnumeration } = require('./waf-rules');
 
 const CORRELATION_RULES = new Set(['949110', '980130']);
@@ -29,6 +29,18 @@ function safeTransactionId(value) {
   if (!raw) return null;
   if (/^[A-Za-z0-9_-]{1,128}$/.test(raw)) return raw;
   return crypto.createHash('sha256').update(raw).digest('base64url').slice(0, 43);
+}
+
+function matchLocations(messages) {
+  const locations = new Set();
+  for (const message of messages) {
+    const text = String(message?.details?.match || '');
+    for (const expression of [
+      /against variable [`'"]?([A-Z][A-Z0-9_]*(?::[A-Za-z0-9_.-]{1,80})?)/gi,
+      /within ([A-Z][A-Z0-9_]*(?::[A-Za-z0-9_.-]{1,80})?)/gi,
+    ]) for (const match of text.matchAll(expression)) locations.add(match[1].toUpperCase());
+  }
+  return [...locations].slice(0, 12);
 }
 
 function accessOutcome(value) {
@@ -102,6 +114,7 @@ function normalizeAudit(value, observedAt = new Date(), historical = false) {
     ? new Date(transaction.time_stamp).toISOString() : observedAt.toISOString();
   const ruleIds = [...new Set(actionable.map((message) => String(message?.details?.ruleId || ''))
     .filter((rule) => /^\d{1,10}$/.test(rule)))];
+  const families = CATEGORY_PRIORITY.filter((candidate) => new Set(actionable.map(messageCategory)).has(candidate));
   const edgeRejected = defaultHostRejection(target, ruleIds);
   const behaviorSummary = serviceEnumeration(pathname, target, ruleIds);
   const pathMatch = pathFinding(pathname);
@@ -119,6 +132,8 @@ function normalizeAudit(value, observedAt = new Date(), historical = false) {
       statusSource: edgeRejected ? 'edge_policy' : 'modsecurity_audit',
       auditStatus: edgeRejected ? auditStatus : null },
     edge: { target, disposition, ruleIds, ruleSummary: ruleSummary(ruleIds),
+      ruleFamilies: [...new Set([...families, ...ruleFamilies(ruleIds)])],
+      matchLocations: matchLocations(actionable),
       behaviorSummary: behaviorSummary || pathMatch?.summary || null,
       anomalyScore: scores.length ? Math.max(...scores) : null,
       interrupted, statusVerified: interrupted || edgeRejected,
@@ -343,4 +358,4 @@ if (require.main === module) {
 }
 
 module.exports = { WafCollector, accessOutcome, correlateAudit, finalDisposition,
-  messageCategory, normalizeAudit, outcomeEvent, safePath, safeTransactionId };
+  matchLocations, messageCategory, normalizeAudit, outcomeEvent, safePath, safeTransactionId };

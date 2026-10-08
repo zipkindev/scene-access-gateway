@@ -257,8 +257,7 @@ class SecurityEvents {
         agentHash: null,
       } : null,
       identityHash: data.identity ? this._hash(String(data.identity).trim().toLowerCase()) : null,
-      requestId: (type === 'waf_finding' || type === 'waf_outcome' ? EDGE_REQUEST_ID : REQUEST_ID)
-        .test(data.requestId || '') ? data.requestId : null,
+      requestId: EDGE_REQUEST_ID.test(data.requestId || '') ? data.requestId : null,
       category: typeof data.category === 'string' ? data.category.slice(0, 80) : null,
       edge: data.edge && typeof data.edge === 'object' ? {
         target: /^[A-Za-z0-9.-]{1,253}$/.test(data.edge.target || '') ? data.edge.target.toLowerCase() : null,
@@ -266,11 +265,15 @@ class SecurityEvents {
           'edge_rejected', 'origin_error', 'outcome_unknown'].includes(data.edge.disposition)
           ? data.edge.disposition : 'outcome_unknown',
         ruleIds: Array.isArray(data.edge.ruleIds) ? [...new Set(data.edge.ruleIds.filter((value) => /^\d{1,10}$/.test(String(value))).map(String))].slice(0, 32) : [],
+        ruleFamilies: Array.isArray(data.edge.ruleFamilies) ? [...new Set(data.edge.ruleFamilies
+          .filter((value) => CATEGORIES.has(String(value))).map(String))].slice(0, 12) : [],
+        matchLocations: Array.isArray(data.edge.matchLocations) ? [...new Set(data.edge.matchLocations
+          .filter((value) => /^[A-Z][A-Z0-9_]*(?::[A-Z0-9_.-]{1,80})?$/.test(String(value))).map(String))].slice(0, 12) : [],
         ruleSummary: typeof data.edge.ruleSummary === 'string'
           ? data.edge.ruleSummary.slice(0, 240).replace(/[\r\n]/g, '') : null,
         behaviorSummary: typeof data.edge.behaviorSummary === 'string'
           ? data.edge.behaviorSummary.slice(0, 240).replace(/[\r\n]/g, '') : null,
-        mode: ['DetectionOnly', 'On'].includes(data.edge.mode) ? data.edge.mode : null,
+        mode: ['DetectionOnly', 'Selective', 'On'].includes(data.edge.mode) ? data.edge.mode : null,
         anomalyScore: Number.isInteger(data.edge.anomalyScore) && data.edge.anomalyScore >= 0 && data.edge.anomalyScore <= 1000
           ? data.edge.anomalyScore : null,
         interrupted: data.edge.interrupted === true,
@@ -316,7 +319,8 @@ class SecurityEvents {
     return classifyRequest(request, url).map((finding) => this.record('suspicious_request', {
       ...finding, request, pathname: url.pathname, ip, outcome: 'observed',
       status: Number.isInteger(status) ? status : null,
-      requestId: REQUEST_ID.test(request.securityRequestId || '') ? request.securityRequestId : null,
+      requestId: EDGE_REQUEST_ID.test(request.edgeRequestId || '') ? request.edgeRequestId
+        : REQUEST_ID.test(request.securityRequestId || '') ? request.securityRequestId : null,
     }));
   }
 
@@ -349,6 +353,9 @@ class SecurityEvents {
       throw new Error('Invalid event cursor ID');
     }
     let cursorReached = !beforeId;
+    const deduplicateRequests = streams.size === 0 && types.size === 0;
+    const preferredWafRequestIds = deduplicateRequests ? new Set([...this.matching({ ...options,
+      before: null, beforeId: null, stream: ['waf'] })].map((event) => event.requestId).filter(Boolean)) : new Set();
     const outcomes = this._wafOutcomes();
     for (const name of this._files().reverse()) {
       const lines = fs.readFileSync(path.join(this.directory, name), 'utf8').trim().split('\n').filter(Boolean).reverse();
@@ -397,6 +404,8 @@ class SecurityEvents {
           || (dispositions.size && !dispositions.has(event.edge?.disposition || event.outcome))
           || (sources.count && (!sourceVersion || !sources.block.check(event.source.ip,
             sourceVersion === 4 ? 'ipv4' : 'ipv6')))) continue;
+        if (deduplicateRequests && event.type !== 'waf_finding'
+          && event.requestId && preferredWafRequestIds.has(event.requestId)) continue;
         yield event;
       }
     }

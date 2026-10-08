@@ -343,6 +343,30 @@ injection, multipart validation, and application 500-response findings. Cards
 say `security rules` rather than assuming every identifier belongs to CRS,
 because ModSecurity can also emit engine-level rules such as `200003`.
 
+The current presentation ruleset also covers the subsequent week of observed
+protocol, header-based operating-system file access, command/RCE, PHP/Node.js,
+and SQL-injection rules. Cards and CSV rows include sanitized match-variable
+names such as `REQUEST_URI`, `ARGS:q`, or `REQUEST_HEADERS:USER-AGENT` when the
+audit supplies them; matched values remain excluded. Rule summaries show the
+first representative descriptions and the number of additional descriptions,
+and rule families remain separately visible.
+
+Final outcomes use response-specific language: 302 is a redirect rather than
+an access decision; 404 means the resource was absent; 405 rejects the method;
+413 rejects the request body; 429 applies rate limiting; and a security-related
+5xx is an origin error requiring investigation. A critical signature followed
+by 200 means the application returned content, not that the detected action
+succeeded. WAF and application records sharing the exact edge request ID are
+shown as one default-view request; explicit stream filters can still expose the
+underlying evidence records.
+
+After the observation window, the WAF uses selective enforcement: only
+high-confidence traversal/LFI, RFI, command/RCE, SQL-injection, XSS, restricted
+file, and backup-file matches promote their transaction to blocking. Generic
+protocol and scanner findings remain observational. Unsupported root POSTs for
+the Firewall access host terminate at the edge with 405, preventing malformed
+multipart input from reaching the origin.
+
 The public page and the authentication challenge have separate lifecycles. A
 normal `GET /` sets only the short-lived browser-binding cookie and records
 `page_served`. Click progress is transient and browser-bound. The application

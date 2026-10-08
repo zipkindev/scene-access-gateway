@@ -9,3 +9,4 @@ USER nginx
 
 COPY --chmod=0444 default.conf.template /etc/nginx/templates/conf.d/default.conf.template
 COPY --chmod=0444 logging.conf.template /etc/nginx/templates/conf.d/logging.conf.template
+COPY --chmod=0444 selective-enforcement.conf /etc/modsecurity.d/owasp-crs/rules/REQUEST-948-SCENE-SELECTIVE-ENFORCEMENT.conf

@@ -74,11 +74,13 @@ approved destination`; responses return through the same layers. The two Nginx
 processes remain separate containers so their configuration, health, logging,
 and certificate reload lifecycles are independently constrained.
 
-The tracked baseline uses `DetectionOnly`, blocking paranoia level 1,
+The tracked baseline begins with `DetectionOnly`, blocking paranoia level 1,
 detection paranoia level 2, and anomaly thresholds 5/4. Detection-only affects
 CRS anomaly enforcement; Nginx hostname rejection and origin isolation remain
-enforced. Promote rules to blocking only after observing representative
-traffic and reviewing false positives.
+enforced. After representative traffic and false-positive review, the
+selective profile promotes only high-confidence traversal/LFI, RFI,
+command/RCE, SQL-injection, XSS, restricted-file, and backup-file transactions
+to blocking. Generic protocol and scanner findings remain observational.
 
 ## Four related audit streams
 

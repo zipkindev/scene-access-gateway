@@ -192,11 +192,13 @@ function issueAssertion(session) { if (!assertionIssuer) assertionIssuer = new A
 async function deliver(to, token) { if (!mailer) mailer = createMailer(loadSmtpConfig()); return mailer.sendMail({ from: loadSmtpConfig().from, to, subject: 'Confirm access', text: `Open this link to confirm access:\n${ORIGIN}/verify/${token}\n\nThis link expires in 15 minutes.` }); }
 function security(type, req, url, data = {}) {
   try { return securityEvents.record(type, { request: req, pathname: url?.pathname || req.url,
-    ip: ip(req), requestId: req.securityRequestId, ...data }); }
+    ip: ip(req), requestId: req.edgeRequestId || req.securityRequestId, ...data }); }
   catch (error) { console.error(JSON.stringify({ event: 'security_event_write_failed', type, error: error.code || error.name || 'Error' })); return null; }
 }
 
 async function handleRequest(req, res) {
+  req.edgeRequestId = /^(?:[0-9a-f]{32}|[0-9a-f-]{36})$/i.test(String(req.headers['x-request-id'] || ''))
+    ? String(req.headers['x-request-id']) : null;
   req.securityRequestId = crypto.randomUUID();
   res.setHeader('X-Request-ID', req.securityRequestId);
   if (typeof req.url !== 'string' || !req.url.startsWith('/')) return send(res, 400, {}, '');

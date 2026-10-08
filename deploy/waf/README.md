@@ -42,6 +42,20 @@ Observation mode records rule matches but does not block on CRS anomaly scores.
 Unknown-host rejection and the origin isolation boundary are enforced by Nginx
 regardless of the ModSecurity mode.
 
+The image also installs a reviewed selective-enforcement layer. High-confidence
+LFI/path traversal, RFI, command/RCE, SQL-injection, XSS, restricted-file, and
+backup-file rules switch only the matching transaction from `DetectionOnly` to
+`On`; CRS then performs its normal anomaly-score denial before the origin.
+Generic scanner and protocol-format findings remain observational. Production
+labels this mixed posture `Selective` in telemetry while the global ModSecurity
+engine remains `DetectionOnly`. This preserves learning data without allowing
+known hostile payload families to consume application processing.
+
+`SAG_WAF_RESTRICT_POST_ROOT_HOST_PATTERN` can identify a reviewed service whose
+root route never accepts POST. Matching `POST /` requests receive HTTP 405 at
+the WAF and never reach the origin. Keep the default no-match expression for
+applications that accept root POSTs.
+
 Audit parts are restricted to `AHZ`: metadata, audit trailer, and terminating
 boundary. Request headers, cookies, authorization values, bodies, response
 bodies, and uploaded files are intentionally excluded. Protect and rotate the
@@ -79,6 +93,8 @@ The first qualifying incident alerts immediately; duplicates accumulate and
 produce a configurable persistence reminder. Rate-limited requests continue
 to count. If the hourly ceiling is reached, the ledger remains complete and a
 later summary reports suppressed notifications.
+Security-correlated final 5xx responses are promoted to critical delivery even
+when the underlying CRS application-error rule is only warning severity.
 
 ## Validation and promotion
 

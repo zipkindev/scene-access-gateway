@@ -172,7 +172,8 @@ function securityCsvRow(event) {
     event.http?.method, event.http?.path, event.http?.status, event.http?.statusSource,
     event.http?.auditStatus, event.http?.upstreamStatus, event.edge?.disposition, event.edge?.mode, event.edge?.originReached,
     event.edge?.correlationStatus, event.classificationVersion,
-    event.edge?.ruleIds, event.edge?.behaviorSummary, event.edge?.ruleSummary, event.edge?.target,
+    event.edge?.ruleIds, event.edge?.ruleFamilies, event.edge?.matchLocations,
+    event.edge?.behaviorSummary, event.edge?.ruleSummary, event.edge?.target,
     event.outcome, event.requestId, event.integrityValid].map(csvCell).join(',');
 }
 
@@ -180,7 +181,7 @@ function securityCsv(events) {
   const columns = ['timestamp', 'event_type', 'severity', 'category', 'source_ip', 'country', 'city',
     'asn', 'organization', 'method', 'path', 'final_http_status', 'status_source', 'audit_http_status',
     'upstream_http_status', 'disposition', 'waf_mode', 'origin_reached', 'correlation_status', 'classification_ruleset',
-    'crs_rules', 'behavior', 'rule_summary', 'target',
+    'security_rules', 'rule_families', 'match_locations', 'behavior', 'rule_summary', 'target',
     'outcome', 'request_id', 'integrity_valid'];
   return '\uFEFF' + [columns.map(csvCell).join(','), ...events.map(securityCsvRow)].join('\r\n') + '\r\n';
 }

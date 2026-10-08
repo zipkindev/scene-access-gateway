@@ -45,6 +45,12 @@ function validate(value) {
     || value.edge.statusVerified !== undefined && typeof value.edge.statusVerified !== 'boolean'
     || value.edge.correlationStatus !== undefined
       && !['pending', 'verified', 'unavailable'].includes(value.edge.correlationStatus)
+    || value.edge.matchLocations !== undefined && (!Array.isArray(value.edge.matchLocations)
+      || value.edge.matchLocations.length > 12
+      || value.edge.matchLocations.some((item) => !/^[A-Z][A-Z0-9_]*(?::[A-Z0-9_.-]{1,80})?$/.test(String(item))))
+    || value.edge.ruleFamilies !== undefined && (!Array.isArray(value.edge.ruleFamilies)
+      || value.edge.ruleFamilies.length > 12
+      || value.edge.ruleFamilies.some((item) => !CATEGORIES.has(String(item))))
     || value.edge.originReached !== undefined && value.edge.originReached !== null
       && typeof value.edge.originReached !== 'boolean'
     || typeof value.edge.originReached === 'boolean' && value.edge.statusVerified !== true
@@ -74,7 +80,7 @@ class WafIngestor {
     this.securityEvents = securityEvents;
     this.stateFile = path.join(dataDirectory, 'scene-management', 'waf-ingest-status.json');
     this.intervalMs = options.intervalMs || 2000;
-    this.mode = ['DetectionOnly', 'On'].includes(options.mode) ? options.mode : 'DetectionOnly';
+    this.mode = ['DetectionOnly', 'Selective', 'On'].includes(options.mode) ? options.mode : 'DetectionOnly';
     this.timer = null;
     try { this.state = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')); } catch (_) { this.state = {}; }
     this.offset = Number.isInteger(this.state.offset) && this.state.offset >= 0 ? this.state.offset : 0;

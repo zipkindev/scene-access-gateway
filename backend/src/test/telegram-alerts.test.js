@@ -46,7 +46,8 @@ test('policy validation is strict and defaults remain disabled', () => {
 test('version 1 scanner policies migrate to the corresponding WAF categories', () => {
   const legacy = validatePolicy({ ...DEFAULT_POLICY, version: 1,
     categories: ['automated_scanner_probe', 'unexpected_http_method'] });
-  assert.equal(legacy.version, 3);
+  assert.equal(legacy.version, 4);
+  assert.ok(legacy.categories.includes('application_error_exposure'));
   assert.ok(legacy.categories.includes('sensitive_file_enumeration'));
   assert.ok(legacy.categories.includes('backup_file_probe'));
   assert.ok(legacy.categories.includes('framework_admin_probe'));
@@ -145,9 +146,27 @@ test('successful WAF observations state the concrete origin result without gener
       originReached: true, ruleIds: ['920320'], ruleSummary: 'Request missing User-Agent header',
     } })), true);
   await alerts.draining;
-  assert.match(requests[0].text, /WAF action: Origin returned a final 2xx\/3xx response/);
+  assert.match(requests[0].text, /WAF action: Request completed with final HTTP 200/);
   assert.match(requests[0].text, /Matched security rules: 920320 · Request missing User-Agent header/);
   assert.doesNotMatch(requests[0].text, /prove access or exploitation/);
+}));
+
+test('security-correlated origin 5xx is promoted to a critical notification', async () => temporary(async (directory) => {
+  const requests = [];
+  const alerts = new TelegramAlerts(directory, { ...credentials(directory), retryDelays: [0],
+    fetch: async (_url, options) => { requests.push(JSON.parse(options.body)); return { ok: true, status: 200 }; } });
+  alerts.updatePolicy({ ...DEFAULT_POLICY, enabled: true, minimumSeverity: 'critical', countThreshold: 1,
+    categories: ['application_error_exposure'] });
+  assert.equal(alerts.enqueue(event({ type: 'waf_finding', severity: 'warning', category: 'application_error_exposure',
+    outcome: 'origin_error', http: { method: 'POST', path: '/', status: 500, statusSource: 'edge_access' },
+    edge: { target: 'firewall.example.invalid', disposition: 'origin_error', statusVerified: true,
+      originReached: true, ruleIds: ['950100'], ruleFamilies: ['application_error_exposure'],
+      matchLocations: ['REQUEST_BODY'] } })), true);
+  await alerts.draining;
+  assert.match(requests[0].text, /CRITICAL · application error exposure/);
+  assert.match(requests[0].text, /[Ff]inal HTTP 500/);
+  assert.match(requests[0].text, /Rule families: application_error_exposure/);
+  assert.match(requests[0].text, /Matched in: REQUEST_BODY/);
 }));
 
 test('historical WAF imports populate monitoring without generating Telegram alerts', async () => temporary(async (directory) => {

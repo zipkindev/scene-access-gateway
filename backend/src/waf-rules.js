@@ -6,29 +6,48 @@ const RULES = Object.freeze({
   '200003': { category: 'protocol_anomaly', severity: 'warning', summary: 'Multipart request body failed strict validation' },
   '911100': { category: 'unexpected_http_method', severity: 'warning', summary: 'HTTP method is not allowed by policy' },
   '920100': { category: 'protocol_anomaly', severity: 'warning', summary: 'Invalid HTTP request line' },
+  '920180': { category: 'protocol_anomaly', severity: 'warning', summary: 'POST omitted both Content-Length and Transfer-Encoding' },
   '913100': { category: 'known_scanner', severity: 'warning', summary: 'Known security scanner signature detected' },
   '920280': { category: 'protocol_anomaly', severity: 'warning', summary: 'Request missing required Host header' },
   '920320': { category: 'protocol_anomaly', severity: 'info', summary: 'Request missing User-Agent header' },
   '920340': { category: 'protocol_anomaly', severity: 'warning', summary: 'Request body has no Content-Type header' },
   '920350': { category: 'protocol_anomaly', severity: 'warning', summary: 'Numeric IP used as the HTTP Host header' },
   '920420': { category: 'protocol_anomaly', severity: 'warning', summary: 'Request Content-Type is not allowed by policy' },
+  '920450': { category: 'protocol_anomaly', severity: 'warning', summary: 'HTTP header is restricted by policy' },
   '920440': { category: 'protocol_anomaly', severity: 'warning', summary: 'URL file extension restricted by policy' },
   '920451': { category: 'protocol_anomaly', severity: 'critical', summary: 'HTTP header restricted by policy' },
   '920500': { category: 'backup_file_probe', severity: 'warning', summary: 'Backup or working file requested' },
+  '920640': { category: 'protocol_anomaly', severity: 'warning', summary: 'Request body has no Content-Type header' },
+  '921422': { category: 'protocol_anomaly', severity: 'warning', summary: 'Dangerous Content-Type parameters detected' },
+  '930121': { category: 'path_traversal_probe', severity: 'critical', summary: 'Operating-system file access pattern detected in request headers' },
   '930130': { category: 'sensitive_file_enumeration', severity: 'critical', summary: 'Restricted or sensitive file requested' },
   '930140': { category: 'backup_file_probe', severity: 'warning', summary: 'Backup or working file requested' },
   '932240': { category: 'command_injection_probe', severity: 'critical', summary: 'Unix command-injection evasion pattern detected' },
+  '932130': { category: 'command_injection_probe', severity: 'critical', summary: 'Unix shell expression detected' },
+  '932200': { category: 'command_injection_probe', severity: 'critical', summary: 'Remote-code-execution bypass technique detected' },
+  '932235': { category: 'command_injection_probe', severity: 'critical', summary: 'Unix command injection detected' },
+  '932236': { category: 'command_injection_probe', severity: 'critical', summary: 'Unix command injection detected' },
+  '932260': { category: 'command_injection_probe', severity: 'critical', summary: 'Direct Unix command execution detected' },
+  '933135': { category: 'command_injection_probe', severity: 'critical', summary: 'PHP variable-access injection detected' },
   '933160': { category: 'command_injection_probe', severity: 'critical', summary: 'High-risk PHP function-call injection pattern detected' },
   '933210': { category: 'command_injection_probe', severity: 'critical', summary: 'PHP variable-function injection pattern detected' },
   '934100': { category: 'command_injection_probe', severity: 'critical', summary: 'Node.js injection pattern detected' },
+  '934101': { category: 'command_injection_probe', severity: 'critical', summary: 'Node.js injection pattern detected' },
   '934130': { category: 'command_injection_probe', severity: 'critical', summary: 'JavaScript prototype-pollution pattern detected' },
   '941340': { category: 'cross_site_scripting_probe', severity: 'critical', summary: 'Cross-site scripting pattern detected by IE filter signatures' },
   '941390': { category: 'cross_site_scripting_probe', severity: 'critical', summary: 'Suspicious JavaScript method pattern detected' },
   '942120': { category: 'sql_injection_probe', severity: 'critical', summary: 'SQL operator injection pattern detected' },
+  '942100': { category: 'sql_injection_probe', severity: 'critical', summary: 'SQL injection detected by libinjection' },
+  '942150': { category: 'sql_injection_probe', severity: 'critical', summary: 'SQL function-name injection pattern detected' },
+  '942151': { category: 'sql_injection_probe', severity: 'critical', summary: 'SQL function-name injection pattern detected' },
+  '942190': { category: 'sql_injection_probe', severity: 'critical', summary: 'SQL execution or information-gathering pattern detected' },
   '942200': { category: 'sql_injection_probe', severity: 'critical', summary: 'MySQL comment or space-obfuscated injection pattern detected' },
   '942300': { category: 'sql_injection_probe', severity: 'critical', summary: 'MySQL comment, condition, or character-function injection pattern detected' },
+  '942270': { category: 'sql_injection_probe', severity: 'critical', summary: 'UNION SELECT injection pattern detected' },
+  '942330': { category: 'sql_injection_probe', severity: 'critical', summary: 'Chained SQL injection pattern detected' },
   '942340': { category: 'sql_injection_probe', severity: 'critical', summary: 'SQL authentication-bypass pattern detected' },
   '942370': { category: 'sql_injection_probe', severity: 'critical', summary: 'Classic SQL injection probing pattern detected' },
+  '942360': { category: 'sql_injection_probe', severity: 'critical', summary: 'Concatenated SQL injection or file-access pattern detected' },
   '942430': { category: 'sql_injection_probe', severity: 'critical', summary: 'Excessive restricted SQL characters detected' },
   '942550': { category: 'sql_injection_probe', severity: 'critical', summary: 'JSON-based SQL injection pattern detected' },
   '950100': { category: 'application_error_exposure', severity: 'warning', summary: 'Application returned a 500-level response' },
@@ -41,7 +60,7 @@ const CATEGORY_PRIORITY = [
   'unexpected_http_method', 'protocol_anomaly', 'automated_scanner_probe',
 ];
 const SEVERITY_RANK = { info: 0, warning: 1, critical: 2 };
-const PRESENTATION_RULESET = '2026-09-26.2';
+const PRESENTATION_RULESET = '2026-10-08.1';
 const SERVICE_ENUMERATION = [
   { pattern: /^\/(?:Remote(?:\/|$)|RDWeb(?:\/|$))/i,
     summary: 'Microsoft Remote Desktop Web service enumeration' },
@@ -115,7 +134,15 @@ function findingSeverity(messages, category = findingCategory(messages)) {
 function ruleSummary(ruleIds) {
   const summaries = [...new Set((Array.isArray(ruleIds) ? ruleIds : [])
     .map((id) => RULES[String(id)]?.summary).filter(Boolean))];
-  return summaries.slice(0, 3).join('; ') || null;
+  if (!summaries.length) return null;
+  const visible = summaries.slice(0, 3).join('; ');
+  return summaries.length > 3 ? `${visible}; +${summaries.length - 3} additional matched rule descriptions` : visible;
+}
+
+function ruleFamilies(ruleIds) {
+  const categories = [...new Set((Array.isArray(ruleIds) ? ruleIds : [])
+    .map((id) => RULES[String(id)]?.category).filter(Boolean))];
+  return CATEGORY_PRIORITY.filter((category) => categories.includes(category));
 }
 
 function defaultHostRejection(target, ruleIds) {
@@ -148,6 +175,9 @@ function presentWafEvent(event) {
   }
   const summary = ruleSummary(ids);
   if (summary) event.edge.ruleSummary = summary;
+  event.edge.ruleFamilies = CATEGORY_PRIORITY.filter((category) => new Set([
+    ...(Array.isArray(event.edge.ruleFamilies) ? event.edge.ruleFamilies : []), ...ruleFamilies(ids),
+  ]).has(category));
   const pathMatch = pathFinding(event.http?.path);
   if (pathMatch) {
     event.category = pathMatch.category;
@@ -206,4 +236,4 @@ function applyWafOutcome(event, correction) {
 
 module.exports = { CATEGORY_PRIORITY, PRESENTATION_RULESET, RULES, findingCategory, findingSeverity, messageCategory,
   applyWafOutcome, defaultHostRejection, pathFinding, presentWafEvent,
-  ruleSeverity, ruleSummary, serviceEnumeration };
+  ruleFamilies, ruleSeverity, ruleSummary, serviceEnumeration };

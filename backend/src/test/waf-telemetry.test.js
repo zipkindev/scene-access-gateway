@@ -5,20 +5,29 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { WafCollector, accessOutcome, correlateAudit, normalizeAudit, safeTransactionId } = require('../waf-collector');
+const { WafCollector, accessOutcome, correlateAudit, matchLocations, normalizeAudit, safeTransactionId } = require('../waf-collector');
 const { PRESENTATION_RULESET, RULES } = require('../waf-rules');
 
 test('current presentation rules cover every rule observed during DetectionOnly review', () => {
   const observed = ['200003', '911100', '920100', '920340', '920420', '932240', '933160',
     '933210', '934100', '934130', '941340', '941390', '942120', '942200', '942300',
-    '942340', '942370', '942430', '942550', '950100'];
-  assert.equal(PRESENTATION_RULESET, '2026-09-26.2');
+    '942340', '942370', '942430', '942550', '950100', '930121', '921422', '932200',
+    '932235', '932130', '932260', '932236', '933135', '934101', '942151', '942150',
+    '920450', '942330', '920640', '920180', '942100', '942190', '942270', '942360'];
+  assert.equal(PRESENTATION_RULESET, '2026-10-08.1');
   for (const id of observed) {
     assert.ok(RULES[id], `missing observed security rule ${id}`);
     assert.ok(RULES[id].summary.length > 12, `vague observed security rule ${id}`);
   }
   assert.equal(RULES['941340'].category, 'cross_site_scripting_probe');
   assert.equal(RULES['950100'].category, 'application_error_exposure');
+});
+
+test('match location extraction retains variable names without matched values', () => {
+  const messages = [{ details: { match: "Matched pattern against variable `REQUEST_HEADERS:User-Agent' (Value: secret)" } },
+    { details: { match: 'Matched data within ARGS:q: do-not-retain' } }];
+  assert.deepEqual(matchLocations(messages), ['REQUEST_HEADERS:USER-AGENT', 'ARGS:Q']);
+  assert.doesNotMatch(JSON.stringify(matchLocations(messages)), /secret|do-not-retain/);
 });
 
 test('standalone collector keeps its polling timer referenced', () => {
@@ -64,7 +73,8 @@ function audit(overrides = {}) {
     request: { hostname: 'access.example.invalid', method: 'GET', uri: '/.env?token=do-not-retain' },
     response: { http_code: 404 },
     messages: [
-      { message: 'Restricted File Access Attempt', details: { ruleId: '930130', severity: '2', tags: ['attack-lfi'] } },
+      { message: 'Restricted File Access Attempt', details: { ruleId: '930130', severity: '2', tags: ['attack-lfi'],
+        match: 'Matched data against variable REQUEST_URI (Value: do-not-retain)' } },
       { message: 'Inbound Anomaly Score Exceeded (Total Score: 5)', details: { ruleId: '949110', severity: '0', tags: [] } },
     ], ...overrides,
   } };
@@ -83,6 +93,8 @@ test('WAF audits normalize into one sanitized high-confidence finding', () => {
   assert.equal(value.edge.correlationStatus, 'pending');
   assert.deepEqual(value.edge.ruleIds, ['930130']);
   assert.equal(value.edge.ruleSummary, 'Restricted or sensitive file requested');
+  assert.deepEqual(value.edge.ruleFamilies, ['sensitive_file_enumeration']);
+  assert.deepEqual(value.edge.matchLocations, ['REQUEST_URI']);
   assert.equal(value.edge.anomalyScore, 5);
   assert.doesNotMatch(JSON.stringify(value), /do-not-retain/);
 });
@@ -241,6 +253,7 @@ test('collector and ingestor persist, deduplicate, and expose WAF status', () =>
       ingestion: { ...ingestor.status() },
     });
     assert.equal(new WafIngestor(null, security, data, { mode: 'On' }).status().mode, 'On');
+    assert.equal(new WafIngestor(null, security, data, { mode: 'Selective' }).status().mode, 'Selective');
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 

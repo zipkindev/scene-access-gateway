@@ -8,6 +8,13 @@ map $http_upgrade $connection_upgrade {
 proxy_headers_hash_max_size 1024;
 proxy_headers_hash_bucket_size 128;
 
+# Optional host-scoped hardening for services whose root endpoint is never a
+# POST target. The value is a reviewed hostname regex, not a wildcard default.
+map "$host:$request_method:$uri" $reject_post_root {
+    default 0;
+    ~^(?:${WAF_RESTRICT_POST_ROOT_HOST_PATTERN}):POST:/$ 1;
+}
+
 server {
     listen ${WAF_LISTEN_PORT} ssl default_server;
     listen [::]:${WAF_LISTEN_PORT} ssl default_server;
@@ -45,6 +52,7 @@ server {
 
     location / {
         client_max_body_size 16m;
+        if ($reject_post_root) { return 405; }
         include includes/proxy_backend.conf;
 
         # Replace all caller-controlled forwarding identity. The origin may

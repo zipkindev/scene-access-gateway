@@ -117,7 +117,7 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(client, /WAF audit HTTP/);
   assert.match(client, /Edge HTTP/);
   assert.match(client, /Final HTTP/);
-  assert.match(client, /Origin returned final 2xx\/3xx/);
+  assert.match(client, /Request completed with final HTTP/);
   assert.doesNotMatch(client, /that alone does not prove access or exploitation/);
   assert.match(client, /securityMap/);
   assert.match(client, /SecurityGlobe\.create/);
@@ -151,7 +151,7 @@ test('Scene Management provides composable security filter controls', () => {
   assert.match(html, /security-globe\.js\?v=99/);
   assert.match(html, /Enable public click debugger/);
   assert.match(client, /scene\.diagnostics = \{ clickDebugger: elements\.clickDebugger\.checked \}/);
-  assert.match(html, /admin\.js\?v=116/);
+  assert.match(html, /admin\.js\?v=117/);
   const globe = fs.readFileSync(path.join(__dirname, '../security-globe.js'), 'utf8');
   assert.match(globe, /cameraSequence/);
   assert.match(globe, /routeDuration/);
@@ -179,7 +179,7 @@ test('stored WAF protocol findings are re-ranked for presentation without rewrit
   assert.equal(listed[0].edge.originReached, false);
   assert.equal(listed[0].edge.ruleSummary, 'Numeric IP used as the HTTP Host header');
   assert.equal(listed[0].edge.correlationStatus, 'verified');
-  assert.equal(listed[0].classificationVersion, '2026-09-26.2');
+  assert.equal(listed[0].classificationVersion, '2026-10-08.1');
   assert.equal(fs.readFileSync(path.join(directory, 'security-events', written.at.slice(0, 10) + '.jsonl'), 'utf8'), stored);
 }));
 
@@ -194,6 +194,23 @@ test('retained unverified WAF findings are terminally unavailable rather than in
   assert.equal(listed[0].edge.correlationStatus, 'unavailable');
   assert.equal(listed[0].edge.statusVerified, false);
   assert.equal(listed[0].edge.ruleSummary, 'Request missing User-Agent header');
+}));
+
+test('default views collapse exact WAF and application request IDs while stream filters retain evidence', () => temporary((directory) => {
+  const events = new SecurityEvents(directory, noGeo);
+  const requestId = '0123456789abcdef0123456789abcdef';
+  events.record('suspicious_request', { ip: '203.0.113.8', severity: 'critical',
+    category: 'sensitive_file_enumeration', outcome: 'observed', requestId,
+    http: { method: 'GET', path: '/.env', status: 404 } });
+  events.record('waf_finding', { ip: '203.0.113.8', severity: 'critical',
+    category: 'sensitive_file_enumeration', outcome: 'origin_rejected', requestId,
+    http: { method: 'GET', path: '/.env', status: 404, statusSource: 'edge_access' },
+    edge: { target: 'access.example.invalid', disposition: 'origin_rejected', statusVerified: true,
+      originReached: true, transactionId: requestId, ruleIds: ['930130'] } });
+  assert.equal(events.list({ since: 'all' }).length, 1);
+  assert.equal(events.list({ since: 'all' })[0].type, 'waf_finding');
+  assert.equal(events.list({ since: 'all', stream: ['application'] }).length, 1);
+  assert.equal(events.list({ since: 'all', stream: ['waf'] }).length, 1);
 }));
 
 test('security events persist bounded structured metadata and hash identities', () => temporary((directory) => {
