@@ -451,3 +451,28 @@ test('WAF ingestion writes synchronously even when the application ledger uses a
     assert.equal(JSON.parse(fs.readFileSync(path.join(security.directory, files[0]), 'utf8')).type, 'waf_finding');
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('retained audit inventories above fifty thousand do not replay after a scan or restart', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sag-waf-inventory-'));
+  try {
+    const root = path.join(directory, 'audit'); fs.mkdirSync(root);
+    for (let index = 0; index < 50001; index += 1) {
+      fs.writeFileSync(path.join(root, String(index).padStart(6, '0') + '.json'), '{"transaction":{}}');
+    }
+    fs.writeFileSync(path.join(root, 'finding.json'), JSON.stringify(audit()));
+    const output = path.join(directory, 'events.jsonl');
+    const state = path.join(directory, 'collector-state.json');
+    const collector = new WafCollector(root, output, state, { graceMs: 0 });
+    assert.equal(collector.scan(), 1);
+    assert.equal(collector.processed.size, 50002);
+    assert.equal(collector.scan(), 0);
+    const restarted = new WafCollector(root, output, state, { graceMs: 0 });
+    assert.equal(restarted.scan(), 0);
+    assert.equal(restarted.processed.size, 50002);
+    // Rotation of an audit removes only that obsolete identity from the cursor.
+    fs.unlinkSync(path.join(root, '000000.json'));
+    assert.equal(restarted.scan(), 0);
+    assert.equal(restarted.processed.size, 50001);
+    assert.equal(fs.readFileSync(output, 'utf8').trim().split('\n').length, 1);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});

@@ -175,7 +175,7 @@ class WafCollector {
     this.maxSegments = options.maxSegments || 4;
     this.timer = null;
     try { this.state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch (_) { this.state = {}; }
-    this.processed = new Set(Array.isArray(this.state.processed) ? this.state.processed.slice(-50000) : []);
+    this.processed = new Set(Array.isArray(this.state.processed) ? this.state.processed.slice(-100000) : []);
     this.pending = new Map(Array.isArray(this.state.pending)
       ? this.state.pending.filter((item) => item?.event?.transactionId).map((item) => [item.event.transactionId, item]) : []);
     this.access = new Map(Array.isArray(this.state.access)
@@ -307,7 +307,12 @@ class WafCollector {
       this._reclaim();
       emitted += this._backfillRetainedOutcomes();
       emitted += this._readAccess();
-      for (const file of filesBelow(this.auditRoot, 100000, new Set([this.accessLog]))) {
+      const auditFiles = filesBelow(this.auditRoot, 100000, new Set([this.accessLog]));
+      const retainedAudits = new Set(auditFiles.map((file) => path.relative(this.auditRoot, file)));
+      // Keep identities for the entire bounded inventory. Evicting retained audits
+      // at a smaller limit replays them on every scan once the tree crosses that limit.
+      for (const relative of this.processed) if (!retainedAudits.has(relative)) this.processed.delete(relative);
+      for (const file of auditFiles) {
         const relative = path.relative(this.auditRoot, file);
         if (this.processed.has(relative)) continue;
         let value;
@@ -333,7 +338,6 @@ class WafCollector {
         this.emitted.add(id);
         emitted += 1;
       }
-      while (this.processed.size > 50000) this.processed.delete(this.processed.values().next().value);
       while (this.pending.size > 5000) {
         const id = this.pending.keys().next().value;
         this.pending.get(id).event.edge.correlationStatus = 'unavailable';
