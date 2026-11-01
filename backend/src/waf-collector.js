@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
+const { identity, segments } = require('./waf-spool');
 const path = require('node:path');
 const { CATEGORY_PRIORITY, defaultHostRejection, findingCategory, findingSeverity, messageCategory, ruleFamilies, ruleSummary,
   pathFinding, serviceEnumeration } = require('./waf-rules');
@@ -170,6 +171,8 @@ class WafCollector {
     this.maxBytes = Number.isInteger(options.maxBytes) ? options.maxBytes
       : Math.min(1024 * 1024 * 1024, Math.max(1024 * 1024,
         Number.parseInt(process.env.WAF_EVENT_MAX_BYTES || String(64 * 1024 * 1024), 10) || 64 * 1024 * 1024));
+    this.ackFile = options.ackFile || process.env.WAF_INGEST_ACK || null;
+    this.maxSegments = options.maxSegments || 4;
     this.timer = null;
     try { this.state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch (_) { this.state = {}; }
     this.processed = new Set(Array.isArray(this.state.processed) ? this.state.processed.slice(-50000) : []);
@@ -227,11 +230,35 @@ class WafCollector {
   _append(event) {
     const line = JSON.stringify(event) + '\n';
     const currentBytes = fs.existsSync(this.outputFile) ? fs.statSync(this.outputFile).size : 0;
+    if (Buffer.byteLength(line) > this.maxBytes) {
+      throw Object.assign(new Error('WAF event exceeds segment limit'), { code: 'EVENT_TOO_LARGE' });
+    }
     if (currentBytes + Buffer.byteLength(line) > this.maxBytes) {
-      throw Object.assign(new Error('WAF event output limit reached'), { code: 'OUTPUT_LIMIT' });
+      this._reclaim();
+      if (segments(this.outputFile).length >= this.maxSegments) {
+        throw Object.assign(new Error('WAF ingestion acknowledgement required'), { code: 'SPOOL_BACKLOG' });
+      }
+      const last = segments(this.outputFile).at(-1);
+      const previous = last ? Number(last.split('.segment-').at(-1).slice(0, 16)) : 0;
+      const suffix = `${String(Math.max(Date.now(), previous + 1)).padStart(16, '0')}-${crypto.randomBytes(16).toString('hex')}`;
+      fs.renameSync(this.outputFile, `${this.outputFile}.segment-${suffix}`);
     }
     fs.appendFileSync(this.outputFile, line, { mode: 0o600 });
     this.state.lastEventAt = event.at;
+  }
+
+  _reclaim() {
+    if (!this.ackFile) return;
+    let ack;
+    try { ack = JSON.parse(fs.readFileSync(this.ackFile, 'utf8')); } catch (_) { return; }
+    if (!Array.isArray(ack.completed)) return;
+    for (const file of segments(this.outputFile)) {
+      const stat = fs.statSync(file);
+      // Acknowledgements are written only after the portal persists its ledger and cursor.
+      if (ack.completed.some((entry) => entry.identity === identity(stat) && entry.size === stat.size)) {
+        fs.unlinkSync(file);
+      }
+    }
   }
 
   _readAccess() {
@@ -277,6 +304,7 @@ class WafCollector {
     let emitted = 0;
     fs.mkdirSync(path.dirname(this.outputFile), { recursive: true, mode: 0o700 });
     try {
+      this._reclaim();
       emitted += this._backfillRetainedOutcomes();
       emitted += this._readAccess();
       for (const file of filesBelow(this.auditRoot, 100000, new Set([this.accessLog]))) {
@@ -286,7 +314,6 @@ class WafCollector {
         try { value = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { continue; }
         const event = normalizeAudit(value, this.now(), this.initializing);
         if (!event) { this.processed.add(relative); continue; }
-        this.processed.add(relative);
         const access = event.transactionId ? this.access.get(event.transactionId) : null;
         if (access) {
           this._append(correlateAudit(event, access));
@@ -295,6 +322,7 @@ class WafCollector {
         } else if (event.transactionId) this.pending.set(event.transactionId,
           { firstSeenAt: this.now().toISOString(), event });
         else { this._append(event); emitted += 1; }
+        this.processed.add(relative);
       }
       const cutoff = this.now().getTime() - this.graceMs;
       for (const [id, pending] of this.pending) {

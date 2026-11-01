@@ -343,3 +343,111 @@ test('late edge outcomes fold into the original signed finding instead of creati
     assert.equal(visible[0].edge.disposition, 'origin_rejected');
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('rotation preserves legacy cursor, drains unread segments across restart and reclaims only acknowledged data', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sag-waf-rotation-'));
+  try {
+    const auditRoot = path.join(directory, 'audit');
+    const telemetry = path.join(directory, 'telemetry');
+    const data = path.join(directory, 'data');
+    fs.mkdirSync(auditRoot); fs.mkdirSync(telemetry);
+    const output = path.join(telemetry, 'events.jsonl');
+    const state = path.join(telemetry, 'collector-state.json');
+    const ackFile = path.join(telemetry, 'ack', 'ingestor.json');
+    const event = (id) => normalizeAudit(audit({ unique_id: id }));
+    const one = JSON.stringify(event('first')) + '\n';
+    fs.writeFileSync(output, one);
+    const recorded = [];
+    const security = { record(type, value) { recorded.push(value.edge.transactionId); return true; } };
+    // Simulate an already ingested legacy active file; rotation occurs before portal startup.
+    const legacy = new WafIngestor(output, security, data);
+    assert.equal(legacy.poll(), 1);
+    const legacyState = JSON.parse(fs.readFileSync(legacy.stateFile));
+    delete legacyState.fileIdentity; delete legacyState.completed; legacyState.version = 1;
+    fs.writeFileSync(legacy.stateFile, JSON.stringify(legacyState));
+    const collector = new WafCollector(auditRoot, output, state,
+      { maxBytes: Buffer.byteLength(one) + 8, maxSegments: 2, ackFile });
+    collector._append(event('second'));
+    collector._append(event('third'));
+    assert.throws(() => collector._append(event('fourth')), { code: 'SPOOL_BACKLOG' });
+    assert.equal(fs.readdirSync(telemetry).filter(n => n.includes('.segment-')).length, 2);
+    const reader = new WafIngestor(output, security, data, { ackFile });
+    assert.equal(reader.poll(), 2);
+    assert.deepEqual(recorded, ['first', 'second', 'third']);
+    collector._append(event('fourth'));
+    const restarted = new WafIngestor(output, security, data, { ackFile });
+    assert.equal(restarted.poll(), 1);
+    assert.equal(restarted.poll(), 0);
+    collector._reclaim();
+    assert.deepEqual(recorded, ['first', 'second', 'third', 'fourth']);
+    assert.equal(fs.readdirSync(telemetry).filter(n => n.includes('.segment-')).length, 0);
+    assert.equal(fs.statSync(output).mode & 0o777, 0o600);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('a full spool retries an audit after acknowledgement instead of marking its finding processed', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sag-waf-backpressure-'));
+  try {
+    const auditRoot = path.join(directory, 'audit'); fs.mkdirSync(auditRoot);
+    const output = path.join(directory, 'events.jsonl');
+    const state = path.join(directory, 'collector-state.json');
+    const collector = new WafCollector(auditRoot, output, state, { maxBytes: 2048, maxSegments: 1 });
+    const event = normalizeAudit(audit());
+    collector._append(event); collector._append(event); collector._append(event);
+    fs.writeFileSync(path.join(auditRoot, 'pending.json'), JSON.stringify(audit({ unique_id: null })));
+    // Fill the active segment up to its remaining capacity.
+    while (true) { try { collector._append(event); } catch (e) { assert.equal(e.code, 'SPOOL_BACKLOG'); break; } }
+    collector.scan();
+    assert.equal(collector.state.lastError, 'SPOOL_BACKLOG');
+    assert.equal(collector.processed.has('pending.json'), false);
+    const archived = require('../waf-spool').segments(output)[0];
+    const ackFile = path.join(directory, 'ack.json');
+    const stat = fs.statSync(archived);
+    fs.writeFileSync(ackFile, JSON.stringify({ completed: [{ identity: require('../waf-spool').identity(stat), size: stat.size }] }));
+    collector.ackFile = ackFile;
+    assert.equal(collector.scan(), 1);
+    assert.equal(collector.state.lastError, null);
+    assert.equal(collector.processed.has('pending.json'), true);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('ledger admission and write failures do not acknowledge or advance past unrecorded events', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sag-waf-ledger-pressure-'));
+  try {
+    const output = path.join(directory, 'events.jsonl');
+    fs.writeFileSync(output, JSON.stringify(normalizeAudit(audit())) + '\n');
+    let mode = 'reject';
+    const security = { record(type, value, options) {
+      assert.equal(options.sync, true);
+      if (mode === 'reject') return null;
+      if (mode === 'error') throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+      return true;
+    } };
+    const reader = new WafIngestor(output, security, directory);
+    assert.equal(reader.poll(), 0);
+    assert.equal(reader.state.lastError, 'LEDGER_BACKPRESSURE');
+    assert.equal(reader.offset, 0);
+    mode = 'error'; reader.poll();
+    assert.equal(reader.state.lastError, 'ENOSPC');
+    assert.equal(reader.offset, 0);
+    mode = 'ok'; assert.equal(reader.poll(), 1);
+    assert.equal(reader.state.lastError, null);
+    assert.equal(reader.poll(), 0);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('WAF ingestion writes synchronously even when the application ledger uses an asynchronous queue', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sag-waf-durable-'));
+  try {
+    const output = path.join(directory, 'events.jsonl');
+    const event = normalizeAudit(audit({ time_stamp: new Date().toISOString() }));
+    fs.writeFileSync(output, JSON.stringify(event) + '\n');
+    const security = new SecurityEvents(directory, noGeo, { asyncWrites: true });
+    const reader = new WafIngestor(output, security, directory);
+    assert.equal(reader.poll(), 1);
+    assert.equal(security.pendingBytes, 0);
+    const files = fs.readdirSync(security.directory).filter(n => n.endsWith('.jsonl'));
+    assert.equal(files.length, 1);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(security.directory, files[0]), 'utf8')).type, 'waf_finding');
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});

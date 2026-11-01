@@ -253,6 +253,17 @@ retention period appropriate for the deployment's jurisdiction and privacy
 policy, restrict backup access, and do not publish screenshots containing real
 events.
 
+The WAF transfer spool rotates at `WAF_EVENT_MAX_BYTES` (64 MiB by default),
+retaining at most four rotated segments plus the active segment. Configure
+`WAF_INGEST_ACK` in both collector and portal to their respective paths for a
+shared acknowledgement file. The portal needs write access only to that file's
+directory, while its event-spool mount stays read-only. A segment is reclaimed
+only after the portal has written its valid events to the security ledger and
+persisted its ingestion cursor. An unread backlog applies backpressure instead
+of dropping events. Ledger admission or write failures also defer ingestion;
+invalid input records are counted as rejected. Existing legacy cursors migrate
+to the retained original segment without replaying its ingested prefix.
+
 The per-installation integrity key and event files are mode `0600`. Keep the
 data volume and backups inaccessible from the public gateway. Integrity
 metadata helps detect modified records but is not a substitute for forwarding

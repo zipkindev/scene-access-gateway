@@ -221,7 +221,7 @@ class SecurityEvents {
       sourceMaximum || (severity === 'info' ? 60 : 120));
   }
 
-  record(type, data = {}) {
+  record(type, data = {}, options = {}) {
     if (!TYPES.has(type)) throw new Error('Invalid security event type');
     const severity = LEVELS.has(data.severity) ? data.severity : 'info';
     const ip = typeof data.ip === 'string' && net.isIP(data.ip) ? data.ip : 'unknown';
@@ -297,7 +297,7 @@ class SecurityEvents {
     }
     const file = path.join(type === 'waf_outcome' ? this.outcomesDirectory : this.directory,
       at.slice(0, 10) + '.jsonl');
-    if (this.asyncWrites) {
+    if (this.asyncWrites && options.sync !== true) {
       this.pendingBytes += bytes;
       this.writeQueue.push({ file, line, bytes, event });
       this._drainWrites();

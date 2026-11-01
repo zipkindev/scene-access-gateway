@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
+const { identity, segments } = require('./waf-spool');
 const path = require('node:path');
 
 const CATEGORIES = new Set([
@@ -81,9 +82,12 @@ class WafIngestor {
     this.stateFile = path.join(dataDirectory, 'scene-management', 'waf-ingest-status.json');
     this.intervalMs = options.intervalMs || 2000;
     this.mode = ['DetectionOnly', 'Selective', 'On'].includes(options.mode) ? options.mode : 'DetectionOnly';
+    this.ackFile = options.ackFile || process.env.WAF_INGEST_ACK || null;
     this.timer = null;
     try { this.state = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')); } catch (_) { this.state = {}; }
     this.offset = Number.isInteger(this.state.offset) && this.state.offset >= 0 ? this.state.offset : 0;
+    this.fileIdentity = this.state.fileIdentity || null;
+    this.completed = Array.isArray(this.state.completed) ? this.state.completed : [];
     this.ids = new Set(Array.isArray(this.state.ids) ? this.state.ids.slice(-20000) : []);
   }
 
@@ -99,54 +103,75 @@ class WafIngestor {
     let ingested = 0;
     let rejected = this.state.rejected || 0;
     try {
-      const stat = fs.statSync(this.inputFile);
-      if (!stat.isFile()) throw new Error('WAF telemetry input is not a file');
-      if (stat.size < this.offset) this.offset = 0;
-      if (stat.size > this.offset) {
-        const descriptor = fs.openSync(this.inputFile, 'r');
-        const length = Math.min(4 * 1024 * 1024, stat.size - this.offset);
-        const buffer = Buffer.alloc(length);
-        fs.readSync(descriptor, buffer, 0, length, this.offset);
-        fs.closeSync(descriptor);
-        const text = buffer.toString('utf8');
-        const complete = text.endsWith('\n');
-        const lines = text.split('\n');
-        if (!complete) lines.pop();
-        const consumed = complete ? Buffer.byteLength(text) : Buffer.byteLength(text.slice(0, text.lastIndexOf('\n') + 1));
-        for (const line of lines.filter(Boolean)) {
-          try {
-            const event = validate(JSON.parse(line));
-            const correlation = event.transactionId || crypto.createHash('sha256').update(JSON.stringify([
-              event.at, event.sourceIp, event.http.method, event.http.path, event.category,
-            ])).digest('base64url').slice(0, 32);
-            const identity = event.source === 'waf_outcome' ? `outcome:${correlation}`
-              : `${correlation}:${event.category}`;
-            if (this.ids.has(identity)) continue;
-            const recorded = event.source === 'waf_outcome'
-              ? this.securityEvents.record('waf_outcome', { at: event.at, ip: event.sourceIp,
-                severity: 'info', outcome: event.outcome, requestId: event.requestId,
-                http: event.http, edge: event.edge })
-              : this.securityEvents.record('waf_finding', { at: event.at, ip: event.sourceIp,
-                severity: event.severity, category: event.category, outcome: event.outcome,
-                requestId: event.requestId || event.transactionId,
-                http: event.http, edge: { ...event.edge, mode: this.mode } });
-            if (!recorded) { rejected += 1; continue; }
-            this.ids.add(identity);
-            ingested += 1;
-            this.state.lastEventAt = event.at;
-          } catch (_) { rejected += 1; }
-        }
-        this.offset += consumed;
+      const archived = segments(this.inputFile);
+      const files = [...archived, this.inputFile];
+      const retained = new Set(files.filter((file) => fs.existsSync(file))
+        .map((file) => identity(fs.statSync(file))));
+      this.completed = this.completed.filter((entry) => retained.has(entry.identity));
+      let budget = 4 * 1024 * 1024;
+      for (const file of files) {
+        if (!fs.existsSync(file)) continue;
+        // Open before inspecting: rotation can rename this path while a poll is reading it.
+        const descriptor = fs.openSync(file, 'r');
+        try {
+          const stat = fs.fstatSync(descriptor);
+          const currentIdentity = identity(stat);
+          if (this.completed.some((entry) => entry.identity === currentIdentity && entry.size === stat.size)) continue;
+          if (this.fileIdentity && this.fileIdentity !== currentIdentity) this.offset = 0;
+          this.fileIdentity = currentIdentity;
+          if (!stat.isFile()) throw new Error('WAF telemetry input is not a file');
+          if (stat.size < this.offset) this.offset = 0;
+          if (stat.size > this.offset) {
+            const length = Math.min(budget, stat.size - this.offset);
+            const buffer = Buffer.alloc(length);
+            fs.readSync(descriptor, buffer, 0, length, this.offset);
+            const text = buffer.toString('utf8');
+            const complete = text.endsWith('\n');
+            const lines = text.split('\n');
+            if (!complete) lines.pop();
+            const consumed = complete ? Buffer.byteLength(text) : Buffer.byteLength(text.slice(0, text.lastIndexOf('\n') + 1));
+            for (const line of lines.filter(Boolean)) {
+              let event;
+              try { event = validate(JSON.parse(line)); }
+              catch (_) { rejected += 1; continue; }
+              const correlation = event.transactionId || crypto.createHash('sha256').update(JSON.stringify([
+                event.at, event.sourceIp, event.http.method, event.http.path, event.category,
+              ])).digest('base64url').slice(0, 32);
+              const identity = event.source === 'waf_outcome' ? `outcome:${correlation}`
+                : `${correlation}:${event.category}`;
+              if (this.ids.has(identity)) continue;
+              const recorded = event.source === 'waf_outcome'
+                ? this.securityEvents.record('waf_outcome', { at: event.at, ip: event.sourceIp,
+                  severity: 'info', outcome: event.outcome, requestId: event.requestId,
+                  http: event.http, edge: event.edge }, { sync: true })
+                : this.securityEvents.record('waf_finding', { at: event.at, ip: event.sourceIp,
+                  severity: event.severity, category: event.category, outcome: event.outcome,
+                  requestId: event.requestId || event.transactionId,
+                  http: event.http, edge: { ...event.edge, mode: this.mode } }, { sync: true });
+              if (!recorded) throw Object.assign(new Error('Security ledger admission deferred'), { code: 'LEDGER_BACKPRESSURE' });
+              this.ids.add(identity);
+              ingested += 1;
+              this.state.lastEventAt = event.at;
+            }
+            this.offset += consumed;
+            budget -= consumed;
+          }
+          if (file !== this.inputFile && this.offset === stat.size) {
+            this.completed.push({ identity: currentIdentity, size: stat.size });
+          } else break; // Finish this segment before advancing to another, including partial lines.
+          if (budget <= 0) break;
+        } finally { fs.closeSync(descriptor); }
       }
       while (this.ids.size > 20000) this.ids.delete(this.ids.values().next().value);
-      this.state = { version: 1, offset: this.offset, ids: [...this.ids],
+      this.state = { version: 2, offset: this.offset, fileIdentity: this.fileIdentity, completed: this.completed, ids: [...this.ids],
         lastPollAt: new Date().toISOString(), lastEventAt: this.state.lastEventAt || null,
         lastError: null, ingested: (this.state.ingested || 0) + ingested, rejected };
     } catch (error) {
-      this.state = { ...this.state, version: 1, offset: this.offset, ids: [...this.ids],
+      this.state = { ...this.state, version: 2, offset: this.offset, fileIdentity: this.fileIdentity, completed: this.completed, ids: [...this.ids],
         lastPollAt: new Date().toISOString(), lastError: error.code || error.name || 'Error', rejected };
     }
     atomicJson(this.stateFile, this.state);
+    if (this.ackFile) atomicJson(this.ackFile, { completed: this.completed });
     return ingested;
   }
 
