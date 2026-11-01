@@ -22,7 +22,7 @@ const { ArcadeLeaderboard } = require('./arcade-leaderboard');
 const { GeoIpLookup } = require('./geoip');
 const { createHostPolicy, matchesRequestOrigin } = require('./host-policy');
 const { MaxMindSetup } = require('./maxmind-setup');
-const { SecurityEvents, sourceIp } = require('./security-events');
+const { SecurityEvents, classifyRequest, sourceIp } = require('./security-events');
 const { TelegramAlerts } = require('./telegram-alerts');
 const { WafIngestor } = require('./waf-ingestor');
 
@@ -498,7 +498,9 @@ async function handleRequest(req, res) {
       return send(res, 200, { 'Content-Type': 'application/json' }, JSON.stringify(result));
     } catch (_) { return send(res, 409, { 'Content-Type': 'application/json' }, '{"detail":"Request could not be completed"}'); }
   }
-  security('request_rejected', req, url, { outcome: 'not_found', severity: 'warning', status: 404 });
+  const [classification] = classifyRequest(req, url);
+  security('request_rejected', req, url, { outcome: 'not_found', severity: classification?.severity || 'warning',
+    category: classification?.category || null, status: 404 });
   return send(res, 404, { 'Content-Type': 'text/html; charset=utf-8' }, notFoundPage());
 }
 

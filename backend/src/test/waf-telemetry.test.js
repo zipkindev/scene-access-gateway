@@ -13,8 +13,12 @@ test('current presentation rules cover every rule observed during DetectionOnly 
     '933210', '934100', '934130', '941340', '941390', '942120', '942200', '942300',
     '942340', '942370', '942430', '942550', '950100', '930121', '921422', '932200',
     '932235', '932130', '932260', '932236', '933135', '934101', '942151', '942150',
-    '920450', '942330', '920640', '920180', '942100', '942190', '942270', '942360'];
-  assert.equal(PRESENTATION_RULESET, '2026-10-08.1');
+    '920450', '920451', '920320', '942330', '920640', '920180', '942100', '942190', '942270', '942360',
+    '200002', '920230', '920250', '920270', '920271', '920540', '920620', '921200',
+    '922130', '932125', '932140', '932231', '932270', '932271', '932281', '932330',
+    '932370', '932380', '933180', '934200', '941100', '941310', '941320', '941330',
+    '941380', '942131', '942180', '942310', '942410', '942440', '942520', '942540'];
+  assert.equal(PRESENTATION_RULESET, '2026-11-01.1');
   for (const id of observed) {
     assert.ok(RULES[id], `missing observed security rule ${id}`);
     assert.ok(RULES[id].summary.length > 12, `vague observed security rule ${id}`);
@@ -126,7 +130,7 @@ test('CRS protocol rules retain their own severity and are not promoted by an HT
     } }],
   }));
   assert.equal(restrictedHeader.category, 'protocol_anomaly');
-  assert.equal(restrictedHeader.severity, 'critical');
+  assert.equal(restrictedHeader.severity, 'warning');
   assert.equal(restrictedHeader.edge.ruleSummary, 'HTTP header restricted by policy');
 
   const missingAgent = normalizeAudit(audit({
@@ -139,6 +143,27 @@ test('CRS protocol rules retain their own severity and are not promoted by an HT
   assert.equal(missingAgent.category, 'protocol_anomaly');
   assert.equal(missingAgent.severity, 'info');
   assert.equal(missingAgent.edge.ruleSummary, 'Request missing User-Agent header');
+});
+
+test('collector marks delayed retained audits historical after initialization', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sag-waf-replay-safe-'));
+  try {
+    const auditRoot = path.join(directory, 'audit');
+    const telemetry = path.join(directory, 'telemetry');
+    fs.mkdirSync(auditRoot);
+    fs.mkdirSync(telemetry);
+    const stateFile = path.join(telemetry, 'collector-state.json');
+    fs.writeFileSync(stateFile, JSON.stringify({ initialized: true, processed: [] }));
+    fs.writeFileSync(path.join(auditRoot, 'old.json'), JSON.stringify(audit({
+      time_stamp: '2026-11-01T11:00:00.000Z', unique_id: 'retained_replay_01',
+    })));
+    const output = path.join(telemetry, 'events.jsonl');
+    const collector = new WafCollector(auditRoot, output, stateFile, {
+      graceMs: 0, replaySafetyMs: 5 * 60 * 1000, now: () => new Date('2026-11-01T12:00:00.000Z'),
+    });
+    assert.equal(collector.scan(), 1);
+    assert.equal(JSON.parse(fs.readFileSync(output, 'utf8')).edge.historical, true);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('a ModSecurity interruption is a verified final edge outcome', () => {

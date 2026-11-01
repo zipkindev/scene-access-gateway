@@ -301,6 +301,8 @@ not used. Telegram incidents are keyed by source
 fingerprint, target, and attack category. The first qualifying event alerts
 immediately, duplicates accumulate, and ongoing activity re-alerts at the
 configured persistence interval. A quiet interval closes the active incident.
+Hourly-limit suppression summaries expire with their one-hour delivery window,
+so recovered historical traffic cannot produce a delayed stale summary.
 
 The deployed WAF has a deterministic exception to the correlation rule: its
 TLS default server returns HTTP 444 for an unrecognized or numeric Host before
@@ -346,6 +348,9 @@ Paginated event reads use the last event's timestamp and unique event ID as a
 keyset cursor. This prevents same-timestamp WAF imports from being skipped at a
 250-card page boundary. Filtered CSV export continues to read the complete
 matching retained ledger rather than depending on browser pagination.
+Exact repeated WAF transaction IDs are collapsed before filtering and
+aggregation, so a collector cursor recovery cannot inflate cards, maps,
+summaries, or CSV rows. The signed ledger is not rewritten.
 
 The ruleset includes curated descriptions for every rule observed during the
 initial DetectionOnly review, including protocol and method violations,
@@ -364,19 +369,22 @@ and rule families remain separately visible.
 
 Final outcomes use response-specific language: 302 is a redirect rather than
 an access decision; 404 means the resource was absent; 405 rejects the method;
-413 rejects the request body; 429 applies rate limiting; and a security-related
-5xx is an origin error requiring investigation. A critical signature followed
-by 200 means the application returned content, not that the detected action
-succeeded. WAF and application records sharing the exact edge request ID are
+413 rejects the request body; 429 applies rate limiting; and 5xx is an origin
+error. A verified 500 finding is promoted for prompt investigation, while a
+routine 503 availability response retains the rule-derived severity instead of
+becoming a critical security page solely because the service was unavailable.
+A critical signature followed by 200 means the application returned content,
+not that the detected action succeeded. WAF and application records sharing the exact edge request ID are
 shown as one default-view request; explicit stream filters can still expose the
 underlying evidence records.
 
 After the observation window, the WAF uses selective enforcement: only
 high-confidence traversal/LFI, RFI, command/RCE, SQL-injection, XSS, restricted
 file, and backup-file matches promote their transaction to blocking. Generic
-protocol and scanner findings remain observational. Unsupported root POSTs for
-the Firewall access host terminate at the edge with 405, preventing malformed
-multipart input from reaching the origin.
+protocol and scanner findings remain observational. The Firewall access host
+retains its required URL-encoded `POST /` login contract. Multipart `POST /`
+requests are outside that contract and switch only that transaction to CRS
+enforcement, preventing malformed multipart input from reaching the origin.
 
 The public page and the authentication challenge have separate lifecycles. A
 normal `GET /` sets only the short-lived browser-binding cookie and records

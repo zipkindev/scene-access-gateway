@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
-const { applyWafOutcome, presentWafEvent } = require('./waf-rules');
+const { applyWafOutcome, pathFinding, presentWafEvent } = require('./waf-rules');
 
 const LEVELS = new Set(['info', 'warning', 'critical']);
 const TYPES = new Set([
@@ -58,6 +58,10 @@ function classifyRequest(request, url) {
   if (SENSITIVE.test(url.pathname)) findings.push({ category: 'sensitive_file_enumeration', severity: 'critical' });
   else if (BACKUP.test(url.pathname)) findings.push({ category: 'backup_file_probe', severity: 'warning' });
   else if (FRAMEWORK.test(url.pathname)) findings.push({ category: 'framework_admin_probe', severity: 'warning' });
+  else {
+    const pathMatch = pathFinding(url.pathname);
+    if (pathMatch) findings.push({ category: pathMatch.category, severity: pathMatch.severity });
+  }
   if (!['GET', 'HEAD', 'POST'].includes(request.method || '')) findings.push({ category: 'unexpected_http_method', severity: 'warning' });
   if (String(request.headers['content-length'] || '').length > 12) findings.push({ category: 'invalid_content_length', severity: 'warning' });
   return findings;
@@ -353,6 +357,7 @@ class SecurityEvents {
       throw new Error('Invalid event cursor ID');
     }
     let cursorReached = !beforeId;
+    const seenWafTransactions = new Set();
     const deduplicateRequests = streams.size === 0 && types.size === 0;
     const preferredWafRequestIds = deduplicateRequests ? new Set([...this.matching({ ...options,
       before: null, beforeId: null, stream: ['waf'] })].map((event) => event.requestId).filter(Boolean)) : new Set();
@@ -384,6 +389,10 @@ class SecurityEvents {
           applyWafOutcome(event, outcomes.get(event.edge.transactionId));
         }
         presentWafEvent(event);
+        if (event.type === 'waf_finding' && event.integrityValid === true && event.edge?.transactionId) {
+          if (seenWafTransactions.has(event.edge.transactionId)) continue;
+          seenWafTransactions.add(event.edge.transactionId);
+        }
         if (event.source?.scope === 'public' && (!event.source.country
           || !Number.isFinite(event.source.latitude) || !Number.isFinite(event.source.longitude))) {
           const enriched = this.geoip.lookup(event.source.ip);

@@ -169,6 +169,31 @@ test('security-correlated origin 5xx is promoted to a critical notification', as
   assert.match(requests[0].text, /Matched in: REQUEST_BODY/);
 }));
 
+test('ordinary origin 503 remains warning severity and does not page a critical-only policy', async () => temporary(async (directory) => {
+  const requests = [];
+  const alerts = new TelegramAlerts(directory, { ...credentials(directory), retryDelays: [0],
+    fetch: async (_url, options) => { requests.push(JSON.parse(options.body)); return { ok: true, status: 200 }; } });
+  alerts.updatePolicy({ ...DEFAULT_POLICY, enabled: true, minimumSeverity: 'critical', countThreshold: 1,
+    categories: ['protocol_anomaly'] });
+  assert.equal(alerts.enqueue(event({ type: 'waf_finding', severity: 'warning', category: 'protocol_anomaly',
+    outcome: 'origin_error', http: { method: 'GET', path: '/api/status', status: 503, statusSource: 'edge_access' },
+    edge: { target: 'service.example.invalid', disposition: 'origin_error', statusVerified: true,
+      originReached: true, ruleIds: ['920320'] } })), false);
+  await alerts.draining;
+  assert.equal(requests.length, 0);
+}));
+
+test('stale hourly-limit suppression summaries are discarded after their delivery window', async () => temporary(async (directory) => {
+  const scene = path.join(directory, 'scene-management');
+  fs.mkdirSync(scene, { recursive: true });
+  fs.writeFileSync(path.join(scene, 'telegram-alert-status.json'), JSON.stringify({
+    suppressedByHourlyLimit: 157, suppressedLastAt: '2026-11-01T10:00:00.000Z',
+  }));
+  const alerts = new TelegramAlerts(directory, { ...credentials(directory),
+    now: () => new Date('2026-11-01T12:00:00.000Z'), fetch: async () => ({ ok: true, status: 200 }) });
+  assert.equal(alerts.state().incidents.suppressedByHourlyLimit, 0);
+}));
+
 test('historical WAF imports populate monitoring without generating Telegram alerts', async () => temporary(async (directory) => {
   const requests = [];
   const alerts = new TelegramAlerts(directory, { ...credentials(directory), retryDelays: [0],

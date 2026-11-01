@@ -51,6 +51,11 @@ labels this mixed posture `Selective` in telemetry while the global ModSecurity
 engine remains `DetectionOnly`. This preserves learning data without allowing
 known hostile payload families to consume application processing.
 
+The Firewall handoff keeps its legitimate URL-encoded `POST /` login contract.
+Multipart submissions to that endpoint are outside the contract and switch the
+individual transaction to enforcement so malformed request bodies are rejected
+by CRS before they can consume pfSense application processing.
+
 `SAG_WAF_RESTRICT_POST_ROOT_HOST_PATTERN` can identify a reviewed service whose
 root route never accepts POST. Matching `POST /` requests receive HTTP 405 at
 the WAF and never reach the origin. Keep the default no-match expression for

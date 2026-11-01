@@ -179,7 +179,10 @@ The normalizer removes headers, bodies, query values, cookies, authorization
 data, and uploads. Transaction identifiers that do not meet the ledger's
 bounded identifier syntax are converted to stable SHA-256-derived correlation
 IDs. A first scan marks existing audit files historical: those records remain
-available for investigation but do not create Telegram notifications. Live
+available for investigation but do not create Telegram notifications. Audits
+discovered more than five minutes after their recorded request time receive the
+same treatment, preventing retained-file cursor repair from replaying old
+traffic into Telegram. Live
 requests also produce a minimal, query-free Nginx correlation record with the
 shared transaction ID, sanitized path, final client status, and upstream
 status. The networkless collector joins it to the audit before ingestion. If
@@ -190,10 +193,13 @@ by source, target, and category; duplicate events are
 aggregated and sustained incidents can produce bounded reminders according to
 the Scene Management policy.
 
-Finding severity is derived from the matched security-rule severity and
-high-confidence attack category, not from a response code. The presentation
-ruleset includes curated descriptions for every CRS and ModSecurity engine rule
-observed during the initial DetectionOnly review. In the UI and
+Finding severity is derived from the curated security-rule severity and
+high-confidence attack category, not from a successful response code. A
+verified final HTTP 500 is promoted for prompt investigation; an ordinary 503
+availability response retains its finding severity and does not become a
+critical security page solely because the service was unavailable. The
+presentation ruleset includes curated descriptions for every CRS and
+ModSecurity engine rule observed during the initial DetectionOnly review. In the UI and
 Telegram, audit status is labeled `WAF audit HTTP`. The collector waits through
 a short correlation window before exposing an unresolved record. Once joined,
 `Final HTTP` is the client response,
@@ -221,6 +227,12 @@ grouped as `service_enumeration`; credential/configuration files, backup files,
 and framework administration endpoints keep their own categories and severity.
 This classification describes attacker behavior, not proof that the named
 product exists on the origin.
+
+Exact repeated WAF transaction IDs are collapsed at read time across cards,
+maps, summaries, filters, and CSV export. The signed append-only records remain
+unchanged, while a recovered collector cursor cannot inflate visible totals.
+Standalone restricted-header rule 920451 is warning-level protocol evidence
+unless another matched attack rule supplies a higher severity.
 
 Scene Management can export the current Security Monitoring view as CSV. The
 export uses the active time range and every active filter and includes only

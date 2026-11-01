@@ -168,6 +168,7 @@ class WafCollector {
     this.intervalMs = options.intervalMs || 2000;
     this.accessLog = options.accessLog || process.env.WAF_ACCESS_LOG || path.join(auditRoot, ACCESS_LOG_NAME);
     this.graceMs = Number.isInteger(options.graceMs) ? options.graceMs : 10000;
+    this.replaySafetyMs = Number.isInteger(options.replaySafetyMs) ? options.replaySafetyMs : 5 * 60 * 1000;
     this.maxBytes = Number.isInteger(options.maxBytes) ? options.maxBytes
       : Math.min(1024 * 1024 * 1024, Math.max(1024 * 1024,
         Number.parseInt(process.env.WAF_EVENT_MAX_BYTES || String(64 * 1024 * 1024), 10) || 64 * 1024 * 1024));
@@ -317,7 +318,11 @@ class WafCollector {
         if (this.processed.has(relative)) continue;
         let value;
         try { value = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { continue; }
-        const event = normalizeAudit(value, this.now(), this.initializing);
+        const observedAt = this.now();
+        const auditAt = Date.parse(value?.transaction?.time_stamp || '');
+        const historical = this.initializing || (Number.isFinite(auditAt)
+          && auditAt < observedAt.getTime() - this.replaySafetyMs);
+        const event = normalizeAudit(value, observedAt, historical);
         if (!event) { this.processed.add(relative); continue; }
         const access = event.transactionId ? this.access.get(event.transactionId) : null;
         if (access) {

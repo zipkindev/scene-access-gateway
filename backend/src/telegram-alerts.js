@@ -116,6 +116,11 @@ function eventCategory(event) {
   return null;
 }
 
+function alertSeverity(event) {
+  if (event.type !== 'waf_finding' || event.edge?.disposition !== 'origin_error') return event.severity;
+  return event.edge?.statusVerified === true && Number(event.http?.status) === 500 ? 'critical' : event.severity;
+}
+
 function maskedSource(source, redaction) {
   const location = [source?.city, source?.region, source?.country].filter(Boolean).join(', ')
     || source?.scope || 'unknown';
@@ -199,6 +204,12 @@ class TelegramAlerts {
     const savedQueue = readJson(this.queueFile, []);
     this.queue = Array.isArray(savedQueue) ? savedQueue.filter((item) => item && typeof item.text === 'string').slice(-100) : [];
     this.delivery = readJson(this.statusFile, { lastSuccessAt: null, lastFailureAt: null, lastFailureCode: null, lastTestAt: null });
+    if (this.delivery.suppressedByHourlyLimit
+      && (!Number.isFinite(Date.parse(this.delivery.suppressedLastAt || ''))
+        || this.now().getTime() - Date.parse(this.delivery.suppressedLastAt) >= 3600000)) {
+      this.delivery.suppressedByHourlyLimit = 0;
+      this.delivery.suppressedLastAt = null;
+    }
     this.integration = readJson(this.metadataFile, { bot: null, chat: null });
     this.aggregates = new Map();
     this.cooldowns = new Map(Object.entries(this.delivery.cooldowns || {}).filter(([, until]) => Number.isFinite(until)));
@@ -347,11 +358,10 @@ class TelegramAlerts {
     const credentials = this._credentials();
     const category = eventCategory(event);
     if (!credentials || !this.policy.enabled || !category || !this.policy.categories.includes(category)) return false;
-    const alertSeverity = event.type === 'waf_finding' && event.edge?.disposition === 'origin_error'
-      ? 'critical' : event.severity;
-    if (LEVELS.indexOf(alertSeverity) < LEVELS.indexOf(this.policy.minimumSeverity)) return false;
+    const effectiveSeverity = alertSeverity(event);
+    if (LEVELS.indexOf(effectiveSeverity) < LEVELS.indexOf(this.policy.minimumSeverity)) return false;
     const now = this.now();
-    if (quiet(this.policy, now) && !(alertSeverity === 'critical' && this.policy.criticalOverride)) return false;
+    if (quiet(this.policy, now) && !(effectiveSeverity === 'critical' && this.policy.criticalOverride)) return false;
     const fingerprint = crypto.createHash('sha256').update(String(event.source?.ip || 'unknown')).digest('hex').slice(0, 12);
     const target = String(event.edge?.target || event.destination || 'portal').slice(0, 253);
     const key = `${category}:${fingerprint}:${target}`;
@@ -367,11 +377,11 @@ class TelegramAlerts {
       incident.thresholdCount = 0;
     }
     incident.thresholdCount = Number(incident.thresholdCount || 0) + 1;
-    const escalated = LEVELS.indexOf(alertSeverity) > LEVELS.indexOf(incident.highestSeverity);
+    const escalated = LEVELS.indexOf(effectiveSeverity) > LEVELS.indexOf(incident.highestSeverity);
     incident.count += 1;
     incident.sinceAlert += 1;
     incident.lastSeenAt = now.getTime();
-    if (LEVELS.indexOf(alertSeverity) > LEVELS.indexOf(incident.highestSeverity)) incident.highestSeverity = alertSeverity;
+    if (LEVELS.indexOf(effectiveSeverity) > LEVELS.indexOf(incident.highestSeverity)) incident.highestSeverity = effectiveSeverity;
     const disposition = String(event.edge?.disposition || event.outcome || 'observed').slice(0, 80);
     incident.dispositions[disposition] = (incident.dispositions[disposition] || 0) + 1;
     this.incidents.set(key, incident);
@@ -389,12 +399,14 @@ class TelegramAlerts {
         `Time: ${now.toISOString()}`,
       ].join('\n'), createdAt: now.toISOString(), test: false });
       this.delivery.suppressedByHourlyLimit = 0;
+      this.delivery.suppressedLastAt = null;
       pendingDeliveries += 1;
       this._saveQueue();
       this._schedule();
     }
     if (this.sent.length + pendingDeliveries >= this.policy.globalLimitPerHour) {
       this.delivery.suppressedByHourlyLimit = Number(this.delivery.suppressedByHourlyLimit || 0) + 1;
+      this.delivery.suppressedLastAt = now.toISOString();
       incident.lastAlertAt = now.getTime();
       this._saveStatus();
       return false;
@@ -416,7 +428,7 @@ class TelegramAlerts {
         + (event.edge.ruleSummary ? ` · ${event.edge.ruleSummary}` : '') : null;
     const text = [
       'Scene Access security alert',
-      `${String(alertSeverity || 'warning').toUpperCase()} · ${category.replaceAll('_', ' ')}`,
+      `${String(effectiveSeverity || 'warning').toUpperCase()} · ${category.replaceAll('_', ' ')}`,
       `Observed since last alert: ${incident.sinceAlert} · total: ${incident.count}`,
       `Time: ${event.at || now.toISOString()}`,
       `Source: ${source}`,

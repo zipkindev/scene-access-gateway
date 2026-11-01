@@ -3,10 +3,15 @@
 const net = require('node:net');
 
 const RULES = Object.freeze({
+  '200002': { category: 'protocol_anomaly', severity: 'warning', summary: 'Request body parsing failed' },
   '200003': { category: 'protocol_anomaly', severity: 'warning', summary: 'Multipart request body failed strict validation' },
   '911100': { category: 'unexpected_http_method', severity: 'warning', summary: 'HTTP method is not allowed by policy' },
   '920100': { category: 'protocol_anomaly', severity: 'warning', summary: 'Invalid HTTP request line' },
   '920180': { category: 'protocol_anomaly', severity: 'warning', summary: 'POST omitted both Content-Length and Transfer-Encoding' },
+  '920230': { category: 'protocol_anomaly', severity: 'warning', summary: 'Multiple URL encoding detected' },
+  '920250': { category: 'protocol_anomaly', severity: 'warning', summary: 'UTF-8 encoding abuse pattern detected' },
+  '920270': { category: 'protocol_anomaly', severity: 'critical', summary: 'Null character detected in request' },
+  '920271': { category: 'protocol_anomaly', severity: 'critical', summary: 'Non-printable character detected in request' },
   '913100': { category: 'known_scanner', severity: 'warning', summary: 'Known security scanner signature detected' },
   '920280': { category: 'protocol_anomaly', severity: 'warning', summary: 'Request missing required Host header' },
   '920320': { category: 'protocol_anomaly', severity: 'info', summary: 'Request missing User-Agent header' },
@@ -15,25 +20,45 @@ const RULES = Object.freeze({
   '920420': { category: 'protocol_anomaly', severity: 'warning', summary: 'Request Content-Type is not allowed by policy' },
   '920450': { category: 'protocol_anomaly', severity: 'warning', summary: 'HTTP header is restricted by policy' },
   '920440': { category: 'protocol_anomaly', severity: 'warning', summary: 'URL file extension restricted by policy' },
-  '920451': { category: 'protocol_anomaly', severity: 'critical', summary: 'HTTP header restricted by policy' },
+  '920451': { category: 'protocol_anomaly', severity: 'warning', summary: 'HTTP header restricted by policy' },
   '920500': { category: 'backup_file_probe', severity: 'warning', summary: 'Backup or working file requested' },
+  '920540': { category: 'protocol_anomaly', severity: 'critical', summary: 'Possible Unicode bypass detected' },
+  '920620': { category: 'protocol_anomaly', severity: 'critical', summary: 'Multiple Content-Type headers detected' },
   '920640': { category: 'protocol_anomaly', severity: 'warning', summary: 'Request body has no Content-Type header' },
   '921422': { category: 'protocol_anomaly', severity: 'warning', summary: 'Dangerous Content-Type parameters detected' },
+  '921200': { category: 'protocol_anomaly', severity: 'critical', summary: 'LDAP injection pattern detected' },
+  '922130': { category: 'protocol_anomaly', severity: 'critical', summary: 'Multipart header contains invalid characters' },
   '930121': { category: 'path_traversal_probe', severity: 'critical', summary: 'Operating-system file access pattern detected in request headers' },
   '930130': { category: 'sensitive_file_enumeration', severity: 'critical', summary: 'Restricted or sensitive file requested' },
   '930140': { category: 'backup_file_probe', severity: 'warning', summary: 'Backup or working file requested' },
   '932240': { category: 'command_injection_probe', severity: 'critical', summary: 'Unix command-injection evasion pattern detected' },
+  '932125': { category: 'command_injection_probe', severity: 'critical', summary: 'Windows PowerShell alias command injection detected' },
+  '932140': { category: 'command_injection_probe', severity: 'critical', summary: 'Windows FOR or IF command injection detected' },
   '932130': { category: 'command_injection_probe', severity: 'critical', summary: 'Unix shell expression detected' },
   '932200': { category: 'command_injection_probe', severity: 'critical', summary: 'Remote-code-execution bypass technique detected' },
   '932235': { category: 'command_injection_probe', severity: 'critical', summary: 'Unix command injection detected' },
   '932236': { category: 'command_injection_probe', severity: 'critical', summary: 'Unix command injection detected' },
   '932260': { category: 'command_injection_probe', severity: 'critical', summary: 'Direct Unix command execution detected' },
+  '932231': { category: 'command_injection_probe', severity: 'critical', summary: 'Unix command injection detected' },
+  '932270': { category: 'command_injection_probe', severity: 'critical', summary: 'Unix shell expression detected' },
+  '932271': { category: 'command_injection_probe', severity: 'critical', summary: 'Unix shell expression detected' },
+  '932281': { category: 'command_injection_probe', severity: 'critical', summary: 'Shell brace expansion detected' },
+  '932330': { category: 'command_injection_probe', severity: 'critical', summary: 'Unix shell history invocation detected' },
+  '932370': { category: 'command_injection_probe', severity: 'critical', summary: 'Windows command injection detected' },
+  '932380': { category: 'command_injection_probe', severity: 'critical', summary: 'Windows command injection detected' },
   '933135': { category: 'command_injection_probe', severity: 'critical', summary: 'PHP variable-access injection detected' },
   '933160': { category: 'command_injection_probe', severity: 'critical', summary: 'High-risk PHP function-call injection pattern detected' },
   '933210': { category: 'command_injection_probe', severity: 'critical', summary: 'PHP variable-function injection pattern detected' },
+  '933180': { category: 'command_injection_probe', severity: 'critical', summary: 'PHP variable function-call injection detected' },
   '934100': { category: 'command_injection_probe', severity: 'critical', summary: 'Node.js injection pattern detected' },
   '934101': { category: 'command_injection_probe', severity: 'critical', summary: 'Node.js injection pattern detected' },
   '934130': { category: 'command_injection_probe', severity: 'critical', summary: 'JavaScript prototype-pollution pattern detected' },
+  '934200': { category: 'command_injection_probe', severity: 'critical', summary: 'Server-side template injection detected' },
+  '941100': { category: 'cross_site_scripting_probe', severity: 'critical', summary: 'Cross-site scripting detected by libinjection' },
+  '941310': { category: 'cross_site_scripting_probe', severity: 'critical', summary: 'Malformed US-ASCII XSS encoding detected' },
+  '941320': { category: 'cross_site_scripting_probe', severity: 'critical', summary: 'Cross-site scripting HTML tag handler detected' },
+  '941330': { category: 'cross_site_scripting_probe', severity: 'critical', summary: 'Cross-site scripting detected by IE filter signatures' },
+  '941380': { category: 'cross_site_scripting_probe', severity: 'critical', summary: 'AngularJS client-side template injection detected' },
   '941340': { category: 'cross_site_scripting_probe', severity: 'critical', summary: 'Cross-site scripting pattern detected by IE filter signatures' },
   '941390': { category: 'cross_site_scripting_probe', severity: 'critical', summary: 'Suspicious JavaScript method pattern detected' },
   '942120': { category: 'sql_injection_probe', severity: 'critical', summary: 'SQL operator injection pattern detected' },
@@ -50,6 +75,13 @@ const RULES = Object.freeze({
   '942360': { category: 'sql_injection_probe', severity: 'critical', summary: 'Concatenated SQL injection or file-access pattern detected' },
   '942430': { category: 'sql_injection_probe', severity: 'critical', summary: 'Excessive restricted SQL characters detected' },
   '942550': { category: 'sql_injection_probe', severity: 'critical', summary: 'JSON-based SQL injection pattern detected' },
+  '942131': { category: 'sql_injection_probe', severity: 'critical', summary: 'Boolean-based SQL injection detected' },
+  '942180': { category: 'sql_injection_probe', severity: 'critical', summary: 'SQL authentication bypass pattern detected' },
+  '942310': { category: 'sql_injection_probe', severity: 'critical', summary: 'Chained SQL injection detected' },
+  '942410': { category: 'sql_injection_probe', severity: 'critical', summary: 'SQL injection pattern detected' },
+  '942440': { category: 'sql_injection_probe', severity: 'critical', summary: 'SQL comment sequence detected' },
+  '942520': { category: 'sql_injection_probe', severity: 'critical', summary: 'SQL authentication bypass pattern detected' },
+  '942540': { category: 'sql_injection_probe', severity: 'critical', summary: 'Split-query SQL authentication bypass detected' },
   '950100': { category: 'application_error_exposure', severity: 'warning', summary: 'Application returned a 500-level response' },
 });
 
@@ -60,7 +92,7 @@ const CATEGORY_PRIORITY = [
   'unexpected_http_method', 'protocol_anomaly', 'automated_scanner_probe',
 ];
 const SEVERITY_RANK = { info: 0, warning: 1, critical: 2 };
-const PRESENTATION_RULESET = '2026-10-08.1';
+const PRESENTATION_RULESET = '2026-11-01.1';
 const SERVICE_ENUMERATION = [
   { pattern: /^\/(?:Remote(?:\/|$)|RDWeb(?:\/|$))/i,
     summary: 'Microsoft Remote Desktop Web service enumeration' },
@@ -122,8 +154,8 @@ function findingCategory(messages) {
 }
 
 function findingSeverity(messages, category = findingCategory(messages)) {
-  const values = messages.map((message) => ruleSeverity(message?.details?.severity)
-    || RULES[ruleId(message)]?.severity).filter(Boolean);
+  const values = messages.map((message) => RULES[ruleId(message)]?.severity
+    || ruleSeverity(message?.details?.severity)).filter(Boolean);
   if (values.length) return values.reduce((highest, value) => SEVERITY_RANK[value] > SEVERITY_RANK[highest] ? value : highest, 'info');
   return ['command_injection_probe', 'sql_injection_probe', 'path_traversal_probe',
     'sensitive_file_enumeration'].includes(category) ? 'critical'

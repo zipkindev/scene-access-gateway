@@ -42,7 +42,24 @@ test('request classification reports categories without retaining the payload', 
     [{ category: 'sensitive_file_enumeration', severity: 'critical' }]);
   assert.deepEqual(classifyRequest({ method: 'GET', headers: {} }, new URL('https://portal.example/_profiler/phpinfo')),
     [{ category: 'framework_admin_probe', severity: 'warning' }]);
+  assert.deepEqual(classifyRequest({ method: 'GET', headers: {} }, new URL('https://portal.example/wp-login.php')),
+    [{ category: 'framework_admin_probe', severity: 'warning' }]);
+  assert.deepEqual(classifyRequest({ method: 'GET', headers: {} }, new URL('https://portal.example/credentials.ini')),
+    [{ category: 'sensitive_file_enumeration', severity: 'critical' }]);
 });
+
+test('replayed WAF transactions appear once in every filtered view', () => temporary((directory) => {
+  const events = new SecurityEvents(directory, noGeo, { retentionDays: 7 });
+  const finding = { ip: '203.0.113.10', at: '2026-11-01T12:00:00.000Z', severity: 'warning',
+    category: 'protocol_anomaly', outcome: 'origin_rejected',
+    http: { method: 'GET', path: '/', status: 404, statusSource: 'edge_access' },
+    edge: { target: 'access.example.invalid', disposition: 'origin_rejected', ruleIds: ['920320'],
+      statusVerified: true, originReached: true, transactionId: 'same-edge-transaction' } };
+  events.record('waf_finding', finding);
+  events.record('waf_finding', finding);
+  assert.equal(events.list({ since: 'all', stream: 'waf' }).length, 1);
+  assert.equal(events.summary({ since: 'all' }).waf.total, 1);
+}));
 
 test('probe events retain response status and a request correlation ID', () => temporary((directory) => {
   const events = new SecurityEvents(directory, noGeo, { retentionDays: 7 });
@@ -179,7 +196,7 @@ test('stored WAF protocol findings are re-ranked for presentation without rewrit
   assert.equal(listed[0].edge.originReached, false);
   assert.equal(listed[0].edge.ruleSummary, 'Numeric IP used as the HTTP Host header');
   assert.equal(listed[0].edge.correlationStatus, 'verified');
-  assert.equal(listed[0].classificationVersion, '2026-10-08.1');
+  assert.equal(listed[0].classificationVersion, '2026-11-01.1');
   assert.equal(fs.readFileSync(path.join(directory, 'security-events', written.at.slice(0, 10) + '.jsonl'), 'utf8'), stored);
 }));
 
