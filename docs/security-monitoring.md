@@ -98,9 +98,12 @@ private backend network; the backend compares its direct TCP peer address with
 an existing source-restricted management proxy can explicitly enroll its exact
 private TCP addresses in `MANAGEMENT_PROXY_IPS`. In that mode the backend also
 requires exactly one `X-Management-Source-IP` equal to `MANAGEMENT_SOURCE_IP`.
-Pin the proxy addresses, overwrite the header at that proxy, retain its original
-caller allowlist, and deny public access to the internal route. An empty proxy
-list preserves direct-peer authorization.
+Alternatively enroll its internal Compose service name in `MANAGEMENT_PROXY_HOSTS`;
+the current private DNS addresses are checked on every request and lookup failure
+denies access. Public DNS names are rejected. Pin explicitly enrolled IP addresses,
+overwrite the header at the proxy, retain its original
+caller allowlist, and deny public access to the internal route. Empty proxy IP and service-name
+lists preserve direct-peer authorization.
 
 If another reverse proxy terminates public TLS, configure that proxy to
 replace client-IP headers and configure Nginx to trust only the exact proxy

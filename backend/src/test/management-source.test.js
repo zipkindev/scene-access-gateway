@@ -7,25 +7,43 @@ function request(peer, value, rawHeaders) {
   return { socket: { remoteAddress: peer }, headers: { 'x-management-source-ip': value },
     rawHeaders: rawHeaders || (value === undefined ? [] : ['X-Management-Source-IP', value]) };
 }
-test('direct mode accepts only the enrolled TCP source and ignores spoofed headers', () => {
+test('direct mode accepts only the enrolled TCP source and ignores spoofed headers', async () => {
   const allowed = createManagementSource(source);
-  assert.equal(allowed(request(source)), true);
-  assert.equal(allowed(request('::ffff:' + source)), true);
-  for (const peer of [proxy, '192.0.2.30', undefined]) assert.equal(allowed(request(peer, source)), false);
+  assert.equal(await allowed(request(source)), true);
+  assert.equal(await allowed(request('::ffff:' + source)), true);
+  for (const peer of [proxy, '192.0.2.30', undefined]) assert.equal(await allowed(request(peer, source)), false);
 });
-test('proxy mode requires both the enrolled TCP proxy and exact original source', () => {
+test('proxy mode requires both the enrolled TCP proxy and exact original source', async () => {
   const allowed = createManagementSource(source, proxy + ',2001:db8::20');
-  assert.equal(allowed(request(proxy, source)), true);
-  assert.equal(allowed(request('::ffff:' + proxy, source)), true);
-  assert.equal(allowed(request('2001:db8::20', source)), true);
-  assert.equal(allowed(request('192.0.2.30', source)), false);
+  assert.equal(await allowed(request(proxy, source)), true);
+  assert.equal(await allowed(request('::ffff:' + proxy, source)), true);
+  assert.equal(await allowed(request('2001:db8::20', source)), true);
+  assert.equal(await allowed(request('192.0.2.30', source)), false);
   for (const value of [undefined, '', '192.0.2.30', source + ', ' + source, [source], ' ' + source]) {
-    assert.equal(allowed(request(proxy, value)), false);
+    assert.equal(await allowed(request(proxy, value)), false);
   }
-  assert.equal(allowed(request(proxy, source, ['X-Management-Source-IP', source, 'x-management-source-ip', source])), false);
+  assert.equal(await allowed(request(proxy, source, ['X-Management-Source-IP', source, 'x-management-source-ip', source])), false);
 });
 test('invalid source or proxy configuration fails closed', () => {
   for (const [source, proxies] of [['invalid', ''], ['192.0.2.10', '*'], ['192.0.2.10', '192.0.2.0/24'], ['192.0.2.10', '192.0.2.20,']]) {
     assert.throws(() => createManagementSource(source, proxies), /Invalid management source/);
   }
+});
+
+test('enrolled private proxy service tracks address changes and fails closed', async () => {
+  let address = proxy;
+  const lookup = async (host, options) => {
+    assert.equal(host, 'management-proxy'); assert.deepEqual(options, { all: true });
+    if (!address) throw Error('DNS unavailable');
+    return [{ address, family: 4 }];
+  };
+  const allowed = createManagementSource(source, '', 'management-proxy', lookup);
+  assert.equal(await allowed(request(proxy, source)), true);
+  address = '192.0.2.40';
+  assert.equal(await allowed(request(proxy, source)), false);
+  assert.equal(await allowed(request(address, source)), true);
+  assert.equal(await allowed(request(address, '192.0.2.30')), false);
+  address = null;
+  assert.equal(await allowed(request(proxy, source)), false);
+  assert.throws(() => createManagementSource(source, '', 'public.example'), /Invalid management proxy/);
 });

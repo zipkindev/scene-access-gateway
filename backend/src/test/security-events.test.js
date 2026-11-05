@@ -92,7 +92,7 @@ test('public Nginx logs correlation metadata and applies bounded source limits',
   assert.match(config, /gzip on/);
   assert.match(config, /Strict-Transport-Security "max-age=86400" always/);
   const server = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
-  assert.match(server, /!managementSourceAllowed\(req\)/);
+  assert.match(server, /!await managementSourceAllowed\(req\)/);
   assert.doesNotMatch(server, /req\.headers\[['"]x-management-source-ip['"]\]/);
 });
 

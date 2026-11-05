@@ -34,7 +34,8 @@ const allowedHost = createHostPolicy(ORIGIN, process.env.PUBLIC_HOST_ALIASES);
 function sameOrigin(req) { return matchesRequestOrigin(req.headers.origin, ORIGIN, allowedHost); }
 const FIREWALL_ORIGIN = (process.env.FIREWALL_ORIGIN || 'http://localhost:8080').replace(/\/$/, '');
 const managementSourceAllowed = createManagementSource(
-  process.env.MANAGEMENT_SOURCE_IP || '127.0.0.1', process.env.MANAGEMENT_PROXY_IPS || '');
+  process.env.MANAGEMENT_SOURCE_IP || '127.0.0.1', process.env.MANAGEMENT_PROXY_IPS || '',
+  process.env.MANAGEMENT_PROXY_HOSTS || '');
 const CHALLENGE_TTL = 15 * 60 * 1000;
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
 const FIREWALL_TTL = 15 * 60 * 1000;
@@ -469,7 +470,7 @@ async function handleRequest(req, res) {
     } catch (_) { return send(res, 403, {}, ''); }
   }
   if (url.pathname.startsWith('/internal/torrentharbor-management/')) {
-    if (!managementSourceAllowed(req)) return send(res, 404, {}, '');
+    if (!await managementSourceAllowed(req)) return send(res, 404, {}, '');
     const acceptsJson = !req.headers.accept || req.headers.accept === '*/*' || req.headers.accept.split(',').some((value) => value.trim().split(';')[0] === 'application/json');
     const jsonRequest = req.method === 'GET' || String(req.headers['content-type'] || '').toLowerCase().split(';')[0].trim() === 'application/json';
     if (!acceptsJson || !jsonRequest) return send(res, 404, { 'Content-Type': 'application/json' }, '{}');
