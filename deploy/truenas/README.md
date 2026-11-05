@@ -92,3 +92,46 @@ cutover, review the exact target, image tags or digests, mounts, networks,
 backups, rollback procedure, health checks, and active-session handling. A
 local build, smoke test, Git push, or successful CI run does not authorize the
 deployment; explicit approval is required for the reviewed procedure.
+
+## Scoped provisioner renewal
+
+`provisioner-renewal.py` is a NAS-local administrative maintenance job. It is
+not part of the public application image and needs no application restart.
+Install it as root-owned mode `0500` in a root-owned private directory, beside
+a root-owned mode `0600` `config.json`. Target-specific configuration stays
+outside Git. The configuration identifies the two existing Compose projects
+and services, the existing credential file and its group, and the exact
+provisioner user, service group, role, target group, allowed global/group
+permissions, owned token prefix and explicitly enrolled initial token IDs.
+
+The job requires running healthy Authentik and portal containers and verifies
+that the identity is active, is not a superuser and has exactly the reviewed
+role grants. It never changes grants, user accounts, application images or
+networking. It rotates only this identity's enrolled token IDs. Authentik's
+normal expiring-token lifetime is retained: the job replaces a credential when
+eight hours remain, or repairs a rejected/mismatched credential. An existing
+healthy credential is otherwise left unchanged.
+
+Use the native NAS scheduler every 15 minutes. Enable one matching job only
+after a read-only `--check`, a supervised `--force` renewal, and a second
+non-forced run pass. Test the native scheduler execution too. A local file lock
+prevents concurrent runs. The credential file is written in place to preserve
+the running container's bind mount; its prior value remains in the private
+maintenance directory. The portal's real management status check must accept
+the new credential before prior enrolled tokens are retired. Failed replacement
+verification restores the prior file and discards only the new candidate. A
+cleanup failure leaves the verified new credential installed for the next run.
+
+`status.json` records only status, expiry, check time and fixed failure codes.
+Keys and captured subprocess output must never appear in logs or receipts.
+Keep standard output ignored and retain the NAS's existing cron error reporting;
+do not configure a new external notification recipient. To roll back the
+scheduler installation, disable only its matching native cron job and retain
+the currently verified credential and protected recovery files. Restore a prior
+credential only while its corresponding Authentik token still exists and works.
+
+Run the maintenance lifecycle tests independently of application image builds:
+
+```sh
+python3 -m unittest discover -s deploy/truenas -p 'test_provisioner_renewal.py' -v
+```
