@@ -74,7 +74,11 @@ reconnaissance profile documented in [security monitoring](../security-monitorin
 TorrentHarbor management API on the private backend network. Public Nginx
 denies that route and removes caller-supplied management source headers. Do not
 set this value to a shared public reverse proxy address or publish the backend
-port.
+port. For an existing private management bridge, `SAG_MANAGEMENT_PROXY_IPS`
+can enroll comma-separated exact proxy peer IPs. The bridge must have pinned
+addresses, restrict the original caller, and overwrite `X-Management-Source-IP`;
+the backend requires both the trusted peer and exactly one matching source header.
+Leave the proxy list empty for direct-peer mode.
 
 `SAG_PUBLIC_HOST_ALIASES` is a comma-separated list of additional public DNS
 hostnames served by the same portal, such as `arcade.example.com`. The backend

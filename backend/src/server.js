@@ -12,6 +12,7 @@ const { landingPage } = require('./landing');
 const { advanceSceneClick } = require('./scene-hit');
 const { PortalStore, tokenHash } = require('./store');
 const management = require('./management');
+const { createManagementSource } = require('./management-source');
 const { createSceneAdmin } = require('./scene-admin');
 const { loginPage, requestPage, submittedPage, confirmedPage, notFoundPage, methodPage } = require('./public-auth-pages');
 const { BACKGROUNDS, SCENE_BUNDLES, SceneStore } = require('./scene-config');
@@ -32,7 +33,8 @@ const ORIGIN = (process.env.PUBLIC_ORIGIN || 'http://localhost:8080').replace(/\
 const allowedHost = createHostPolicy(ORIGIN, process.env.PUBLIC_HOST_ALIASES);
 function sameOrigin(req) { return matchesRequestOrigin(req.headers.origin, ORIGIN, allowedHost); }
 const FIREWALL_ORIGIN = (process.env.FIREWALL_ORIGIN || 'http://localhost:8080').replace(/\/$/, '');
-const MANAGEMENT_SOURCE_IP = process.env.MANAGEMENT_SOURCE_IP || '127.0.0.1';
+const managementSourceAllowed = createManagementSource(
+  process.env.MANAGEMENT_SOURCE_IP || '127.0.0.1', process.env.MANAGEMENT_PROXY_IPS || '');
 const CHALLENGE_TTL = 15 * 60 * 1000;
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
 const FIREWALL_TTL = 15 * 60 * 1000;
@@ -145,10 +147,6 @@ function sequenceUnlocked(token, active, destinationId) {
       && clickSessions.get(token)?.unlocks.has(destinationId));
 }
 function ip(req) { return sourceIp(req); }
-function peerIp(req) {
-  const value = String(req.socket?.remoteAddress || '');
-  return value.startsWith('::ffff:') ? value.slice(7) : value;
-}
 function email(value) { const normalized = value.trim().toLowerCase(); return EMAIL.test(normalized) && normalized.length <= 254 ? normalized : null; }
 function identifier(value) { return normalizedEmail(value) || normalizedUsername(value); }
 function send(res, status, headers, body) { res.writeHead(status, { 'Cache-Control': 'no-store, max-age=0', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff', 'X-Permitted-Cross-Domain-Policies': 'none', 'Strict-Transport-Security': 'max-age=86400', 'Permissions-Policy': 'camera=(), geolocation=(), microphone=(), payment=(), usb=()', 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Resource-Policy': 'same-origin', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'", ...headers }); res.end(body); }
@@ -471,7 +469,7 @@ async function handleRequest(req, res) {
     } catch (_) { return send(res, 403, {}, ''); }
   }
   if (url.pathname.startsWith('/internal/torrentharbor-management/')) {
-    if (peerIp(req) !== MANAGEMENT_SOURCE_IP) return send(res, 404, {}, '');
+    if (!managementSourceAllowed(req)) return send(res, 404, {}, '');
     const acceptsJson = !req.headers.accept || req.headers.accept === '*/*' || req.headers.accept.split(',').some((value) => value.trim().split(';')[0] === 'application/json');
     const jsonRequest = req.method === 'GET' || String(req.headers['content-type'] || '').toLowerCase().split(';')[0].trim() === 'application/json';
     if (!acceptsJson || !jsonRequest) return send(res, 404, { 'Content-Type': 'application/json' }, '{}');

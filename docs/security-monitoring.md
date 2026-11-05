@@ -94,8 +94,13 @@ publish the backend port directly.
 The public listener removes `X-Management-Source-IP` and denies
 `/internal/torrentharbor-management/`. A trusted management caller must use the
 private backend network; the backend compares its direct TCP peer address with
-`MANAGEMENT_SOURCE_IP`. Forwarded source headers are never sufficient for
-management authorization.
+`MANAGEMENT_SOURCE_IP`. Forwarded source headers alone never authorize management. Deployments with
+an existing source-restricted management proxy can explicitly enroll its exact
+private TCP addresses in `MANAGEMENT_PROXY_IPS`. In that mode the backend also
+requires exactly one `X-Management-Source-IP` equal to `MANAGEMENT_SOURCE_IP`.
+Pin the proxy addresses, overwrite the header at that proxy, retain its original
+caller allowlist, and deny public access to the internal route. An empty proxy
+list preserves direct-peer authorization.
 
 If another reverse proxy terminates public TLS, configure that proxy to
 replace client-IP headers and configure Nginx to trust only the exact proxy
